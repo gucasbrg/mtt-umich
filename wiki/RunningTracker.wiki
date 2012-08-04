@@ -7,9 +7,9 @@ Currently, we use DPM detector by Felzenszwalb et al as a baseline method. The m
 
 = Details =
 
-1. Move to directory matlab
-2. run "process_all_confidence" to download required packages and process images. In case, you want to track objects other than human use "process_all_confidence_object" instead. 
-3. generate image and confidence list files using commands like
+ 1. Move to directory matlab
+ 2. run "process_all_confidence" to download required packages and process images. In case, you want to track objects other than human use "process_all_confidence_object" instead. 
+ 3. generate image and confidence list files using commands like
  ls seq02-img-left/*.jpg > seq02_imlist.txt
  ls seq02-img-left/*.conf > seq02_conflist.txt
-4. modify "track.sh" in "standalone_tracker" accordingly and run the tracker. 
+ 4. modify "track.sh" in "standalone_tracker" accordingly and run the tracker. 
