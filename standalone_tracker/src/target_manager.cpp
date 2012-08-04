@@ -62,7 +62,7 @@ Target::~Target()
 {
 }
 
-void Target::setLocation(ObjectStatePtr loc, cv::Rect rt, cv::Mat image)
+void Target::setLocation(PeopleStatePtr loc, cv::Rect rt, cv::Mat image)
 {
 	states_.push_back(loc);
 	rts_.push_back(rt);
@@ -91,24 +91,30 @@ void Target::setLocation(ObjectStatePtr loc, cv::Rect rt, cv::Mat image)
 bool Target::writeToFile(std::string filename)
 {
 	std::ofstream out(filename.c_str()); 
+
 	if(!out) { 
 		cout << "Target::writeToFile - Cannot open file " << filename << std::endl; 
 		return false;
 	} 
+	
 	for(size_t i = 0; i < states_.size(); i++)
 	{
 		out << std::setprecision(30) 
-				  << states_[i]->getTS() << " " ;
-		// write states
-		for(size_t j = 0; j < states_[i]->numElement(); j++)
-			out << states_[i]->getElement(j) << " ";
-		// write rect and confidence
-		out << rts_[i].x << " "
-			  << rts_[i].y << " "
-			  << rts_[i].width << " "
-			  << rts_[i].height << " "
-			  << states_[i]->getConfidence() << " "
-			  << std::endl;
+				  << states_[i]->getTS() << " " 
+				  << states_[i]->getX() << " "
+				  << states_[i]->getY() << " "
+				  << states_[i]->getZ() << " "
+#ifdef VEL_STATE
+				  << states_[i]->getVX() << " "
+				  << states_[i]->getVY() << " "
+				  << states_[i]->getVZ() << " "
+#endif
+				  << rts_[i].x << " "
+				  << rts_[i].y << " "
+				  << rts_[i].width << " "
+				  << rts_[i].height << " "
+				  << states_[i]->getConfidence() << " "
+				  << std::endl;
 	}
 	out.close();
 
@@ -132,14 +138,31 @@ double Target::getOverlap(const cv::Rect &rt)
 {
 	cv::Rect last_rt = rts_[rts_.size() - 1];
 	cv::Rect det = rt;
+#if 0
+	// less 
+	if(last_rt.height < 60) {
+		last_rt.x -= last_rt.width / 4;
+		last_rt.width *= 1.5;
+		last_rt.height *= 2;
 
+		det.x -= det.width / 4;
+		det.width *= 1.5;
+		det.height *= 2;
+	}
+#endif
 	return bb_overlap(det, last_rt);
 }
 
-double Target::getDistance(ObjectStatePtr state)
+double Target::getDistance(PeopleStatePtr state)
 {
-	ObjectStatePtr last_state = states_[states_.size() - 1];
+	PeopleStatePtr last_state = states_[states_.size() - 1];
 	return state_dist(last_state, state);
+#if 0
+	double dx = last_state->x_ - state->x_;
+	double dy = last_state->y_ - state->y_;
+	double dz = last_state->z_ - state->z_;
+	return sqrt(dx * dx + dy * dy + dz * dz);
+#endif
 }
 
 int Target::findIdx(double ts)
@@ -168,7 +191,7 @@ Feature::~Feature()
 {
 }
 
-void Feature::setState(FeatureStatePtr state, cv::Point2f proj, cv::Point2f obs)
+void Feature::setState(GFeatStatePtr state, cv::Point2f proj, cv::Point2f obs)
 {
 	states_.push_back(state);
 	projs_.push_back(proj);
@@ -187,17 +210,16 @@ bool Feature::writeToFile(std::string filename)
 	for(size_t i = 0; i < states_.size(); i++)
 	{
 		out << std::setprecision(30) 
-				  << states_[i]->getTS() << " ";
-		// write states
-		for(size_t j = 0; j < states_[i]->numElement(); j++)
-			out << states_[i]->getElement(j) << " ";
-		// write confidence and position
-		out << states_[i]->getConfidence() << " "
-			  << projs_[i].x << " "
-			  << projs_[i].y << " "
-			  << obs_[i].x << " "
-			  << obs_[i].y << " "
-			  << std::endl;
+				  << states_[i]->getTS() << " " 
+				  << states_[i]->getX() << " "
+				  << states_[i]->getY() << " "
+				  << states_[i]->getZ() << " "
+				  << states_[i]->getConfidence() << " "
+				  << projs_[i].x << " "
+				  << projs_[i].y << " "
+				  << obs_[i].x << " "
+				  << obs_[i].y << " "
+				  << std::endl;
 	}
 	out.close();
 
@@ -221,7 +243,7 @@ Camera::~Camera()
 {
 }
 
-void Camera::setState(CameraStatePtr cam)
+void Camera::setState(CamStatePtr cam)
 {
 	states_.push_back(cam);
 }
@@ -238,11 +260,16 @@ bool Camera::writeToFile(std::string filename)
 	for(size_t i = 0; i < states_.size(); i++)
 	{
 		out << std::setprecision(30) 
-			  << states_[i]->getTS() << " ";
-		// write states
-		for(size_t j = 0; j < states_[i]->numElement(); j++)
-			out << states_[i]->getElement(j) << " ";
-		out << std::endl;
+				  << states_[i]->getTS() << " " 
+				  << states_[i]->getX() << " "
+				  << states_[i]->getY() << " "
+				  << states_[i]->getZ() << " "
+				  << states_[i]->getV() << " "
+				  << states_[i]->getYaw() << " "
+				  << states_[i]->getHorizon() << " "
+				  << states_[i]->getFocal() << " "
+				  << states_[i]->getXcenter() << " "
+				  << std::endl;
 	}
 	out.close();
 
@@ -372,7 +399,7 @@ TargetManager::~TargetManager()
 {
 }
 
-void TargetManager::updateCamera(CameraStatePtr cam_hat)
+void TargetManager::updateCamera(CamStatePtr cam_hat)
 {
 	cam_.setState(cam_hat);
 	// gt_cam_.setState(cam_gt);
@@ -480,7 +507,7 @@ void TargetManager::setParameters(const std::string &name, const std::string &va
  *
  *
  ***/
-float TargetManager::computeDistance(const TargetPtr target, const ObjectStatePtr det, const cv::Mat &image)
+float TargetManager::computeDistance(const TargetPtr target, const PeopleStatePtr det, const cv::Mat &image)
 {
 	float dist = 0;
 	
@@ -564,7 +591,7 @@ void TargetManager::getProposals(const std::vector<cv::Rect> &dets, const cv::Ma
 }
 
 // arrange detections by solving association problem to targets.
-void TargetManager::getProposals(const std::vector<ObjectStatePtr> &dets, const cv::Mat &image, std::vector<ObjectStatePtr> &proposals)
+void TargetManager::getProposals(const std::vector<PeopleStatePtr> &dets, const cv::Mat &image, std::vector<PeopleStatePtr> &proposals)
 {
 	std::vector<int>				association;
 	std::vector<TargetPtr> 	trackingTargets;
@@ -608,7 +635,7 @@ void TargetManager::getProposals(const std::vector<ObjectStatePtr> &dets, const 
 	// allocate proposals
 	for(size_t i = 0; i < association.size(); i++)
 	{
-		ObjectStatePtr state;
+		PeopleStatePtr state;
 		if(association[i] >= 0) {
 			state = dets[association[i]];
 #ifdef _DEBUG
@@ -707,12 +734,12 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 	// filter from confidence values
 	for(size_t i = 0; i < targets_.size(); i++) {
 		if(targets_[i]->getStatus() == TargetTracking) {
-			ObjectStatePtr state = targets_[i]->getState(targets_[i]->getNumStates() - 1);
+			PeopleStatePtr state = targets_[i]->getState(targets_[i]->getNumStates() - 1);
 			if(state->getConfidence() < threshold) {
 				targets_[i]->setStatus(TargetTerminated);
 				remove_idx.push_back(current_target_idx[i]);
-				// std::cout << "Terminating target " << i << " : confidence " << std::setprecision(5) << state->getConfidence() << std::endl;
-				// std::cout << "\t loc : " << state->getX() << ", " << state->getY() << ", " << state->getZ() << std::endl;
+				std::cout << "Terminating target " << i << " : confidence " << std::setprecision(5) << state->getConfidence() << std::endl;
+				std::cout << "\t loc : " << state->getX() << ", " << state->getY() << ", " << state->getZ() << std::endl;
 			}
 			else {
 				// std::cout << "Tracking target " << i << " : confidence " << std::setprecision(5) << state->getConfidence() << std::endl;

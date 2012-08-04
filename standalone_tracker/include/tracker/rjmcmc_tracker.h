@@ -34,10 +34,15 @@
 
 #include <sys/time.h>
 #include <opencv/cv.h>
+#include <common/ped_state.h>
 #include <common/mcmc_sample.h>
 #include <prior/PriorDist.h>
 #include <proposal/rjmcmc_proposal.h>
 #include <observation/ObservationManager.h>
+
+#ifndef CAM_EST
+error
+#endif
 
 namespace people {
 	class MeanShiftWrapper
@@ -60,8 +65,8 @@ namespace people {
 			my_assert(info.type_ != MoveDelete);
 
 			if((info.type_ == MoveStay) || (info.type_ == MoveUpdate)) {
-				ObjectStatePtr state = info.obj_state_;
-				CameraStatePtr cam = sample->getCameraState();
+				PeopleStatePtr state = info.state_;
+				CamStatePtr cam = sample->getCamState();
 				
 				new_people_cache_[info.idx_] = computeMotionLkhood(state, cam, info.idx_);
 			}
@@ -70,10 +75,10 @@ namespace people {
 			}
 			else if(info.type_ == MoveCamUpdate) {
 				double lkhood;
-				CameraStatePtr cam = info.cam_state_;
+				CamStatePtr cam = info.cam_state_;
 				for(size_t i = 0 ; i < ms_rts_.size(); i++) {
-					if(sample->getObjectExistance(i)) {
-						ObjectStatePtr state = sample->getObjectState(i);
+					if(sample->getExistance(i)) {
+						PeopleStatePtr state = sample->getState(i);
 						lkhood = computeMotionLkhood(state, cam, i);
 					}
 					else {
@@ -89,9 +94,9 @@ namespace people {
 			double lkhood;
 			people_cache_.clear();
 			for(int i = 0; i < (int)ms_rts_.size(); i++) {
-				if(sample->getObjectExistance(i)) {
-					ObjectStatePtr state = sample->getObjectState(i);
-					CameraStatePtr cam = sample->getCameraState();
+				if(sample->getExistance(i)) {
+					PeopleStatePtr state = sample->getState(i);
+					CamStatePtr cam = sample->getCamState();
 
 					lkhood = computeMotionLkhood(state, cam, i);
 				}
@@ -162,7 +167,7 @@ namespace people {
 			}
 		};
 	protected:
-		double computeMotionLkhood(ObjectStatePtr state, CameraStatePtr cam, int idx)
+		double computeMotionLkhood(PeopleStatePtr state, CamStatePtr cam, int idx)
 		{
 			double ret = 0.0;
 			// not reliable
@@ -221,7 +226,6 @@ namespace people {
 	public:
 		ObservationWrapper():obs_mgr_(NULL){};
 		virtual ~ObservationWrapper(){};
-
 		void setObsMgr(ObservationManager *mgr) {
 			obs_mgr_ = mgr;
 		}
@@ -230,7 +234,7 @@ namespace people {
 		{
 			assert(obs_mgr_ != NULL);
 			if((info.type_ == MoveAdd) || (info.type_ == MoveStay) || (info.type_ == MoveUpdate)) {
-				new_people_cache_[info.idx_] = obs_mgr_->getObjectConfidence(info.obj_state_, sample->getCameraState());
+				new_people_cache_[info.idx_] = obs_mgr_->getPeopleConfidence(info.state_, sample->getCamState());
 			}
 			else if((info.type_ == MoveDelete) || (info.type_ == MoveLeave)) {
 				new_people_cache_[info.idx_] = 0.0f;
@@ -241,17 +245,17 @@ namespace people {
 			}
 			// feature related 
 			else if((info.type_ == MoveFeatAdd) || (info.type_ == MoveFeatStay) || (info.type_ == MoveFeatUpdate)){
-				new_feat_cache_[info.idx_] = obs_mgr_->getFeatureConfidence(info.feat_state_, info.idx_, sample->getCameraState());
+				new_feat_cache_[info.idx_] = obs_mgr_->getGFeatConfidence(info.feat_state_, info.idx_, sample->getCamState());
 			}
 			else if((info.type_ == MoveFeatDelete) || (info.type_ == MoveFeatLeave)){
 				new_feat_cache_[info.idx_] = 0.0;
 			}
 			// camera related
 			else if (info.type_ == MoveCamUpdate) {
-				for(int i = 0; i < (int)sample->getNumObjects(); i++) {
-					if(sample->getObjectExistance(i)) {
-						ObjectStatePtr state = sample->getObjectState(i);
-						new_people_cache_[i] = obs_mgr_->getObjectConfidence(state, info.cam_state_);
+				for(int i = 0; i < (int)sample->getNumTargets(); i++) {
+					if(sample->getExistance(i)) {
+						PeopleStatePtr state = sample->getState(i);
+						new_people_cache_[i] = obs_mgr_->getPeopleConfidence(state, info.cam_state_);
 					}
 					else {
 						new_people_cache_[i] = 0.0f;
@@ -259,10 +263,10 @@ namespace people {
 					}
 				}
 
-				for(int i = 0; i < (int)sample->getNumFeatures(); i++) {
-					if(sample->getFeatureValidity(i)) {
-						FeatureStatePtr state = sample->getFeatureState(i);
-						new_feat_cache_[i] = obs_mgr_->getFeatureConfidence(state, i, info.cam_state_);
+				for(int i = 0; i < (int)sample->getNumGFeats(); i++) {
+					if(sample->getFeatValidity(i)) {
+						GFeatStatePtr state = sample->getFeatState(i);
+						new_feat_cache_[i] = obs_mgr_->getGFeatConfidence(state, i, info.cam_state_);
 					}
 					else {
 						new_feat_cache_[i] = 0.0f;
@@ -281,11 +285,11 @@ namespace people {
 			assert(obs_mgr_ != NULL);
 
 			people_cache_.clear();
-			for(int i = 0; i < (int)sample->getNumObjects(); i++) {
-				if(sample->getObjectExistance(i)) {
-					ObjectStatePtr state = sample->getObjectState(i);
+			for(int i = 0; i < (int)sample->getNumTargets(); i++) {
+				if(sample->getExistance(i)) {
+					PeopleStatePtr state = sample->getState(i);
 
-					double lkhood = obs_mgr_->getObjectConfidence(state, sample->getCameraState());
+					double lkhood = obs_mgr_->getPeopleConfidence(state, sample->getCamState());
 					people_cache_.push_back(lkhood);
 				}
 				else {
@@ -294,11 +298,11 @@ namespace people {
 			}
 			
 			feat_cache_.clear();
-			for(int i = 0; i < (int)sample->getNumFeatures(); i++) {
-				if(sample->getFeatureValidity(i)) {
-					FeatureStatePtr state = sample->getFeatureState(i);
+			for(int i = 0; i < (int)sample->getNumGFeats(); i++) {
+				if(sample->getFeatValidity(i)) {
+					GFeatStatePtr state = sample->getFeatState(i);
 
-					double lkhood = obs_mgr_->getFeatureConfidence(state, i, sample->getCameraState());
+					double lkhood = obs_mgr_->getGFeatConfidence(state, i, sample->getCamState());
 					feat_cache_.push_back(lkhood);
 				}
 				else {
@@ -345,8 +349,35 @@ namespace people {
 				for(size_t i = 0; i < new_feat_cache_.size(); i++) {
 					ret += (double)(new_feat_cache_[i] - feat_cache_[i]);
 				}
-				ret += obs_mgr_->getCameraConfidence(info.cam_state_) - obs_mgr_->getCameraConfidence(sample->getCameraState());
-
+				//std::cout << " feats : " << ret ;
+#if 0 // def HORIZON_EST
+				// horizon observation using detections!!!
+				{
+					std::vector<int> votes;
+					std::vector<double> std;
+					CamStatePtr cam = sample->getCamState();
+					obs_mgr_->getHorizonVotes(votes, std, cam->getY());
+					// std::cout << "confidence : " << ret << std::endl;
+					for(size_t i = 0; i < votes.size(); i++) {
+						double new_dist = votes[i] - info.cam_state_->getHorizon();
+						double old_dist = votes[i] - cam->getHorizon();
+						ret += - min(pow(new_dist / std[i], 2), 9.0);
+						ret -= - min(pow(old_dist / std[i], 2), 9.0);
+						//std::cout << "vote " << votes[i] << " " ;
+						//print_rect(dets[i]);
+						//std::cout << "new_dist : " << new_dist << " " ;
+						//info.cam_state_->print();
+						//std::cout << "old_dist : " << old_dist << " " ;
+						//cam->print();
+					}
+					//std::cout << "confidence : " << ret << std::endl;
+					//cv::waitKey();
+					//std::cout << " horizon : " << ret ;
+				}
+#endif
+#if 1
+				ret += obs_mgr_->getCameraConfidence(info.cam_state_) - obs_mgr_->getCameraConfidence(sample->getCamState());
+#endif
 				my_assert(!isnan(ret));
 				break;
 			default:
@@ -405,7 +436,7 @@ namespace people {
 	class RJMCMCTracker
 	{
 	public:
-		RJMCMCTracker():prev_dist_(boost::make_shared<PosteriorDist>(PosteriorDist()))
+		RJMCMCTracker():rng_((double)time(NULL)),prev_dist_(boost::make_shared<PosteriorDist>(PosteriorDist()))
 		{
 			setDefaultParameters();
 		}
@@ -426,14 +457,13 @@ namespace people {
 			setProposals(proposals); 
 			setObservationManager(mgr);
 		}
-
 		void 	setProposals(const std::vector<cv::Rect> &proposals){ proposals_ = proposals; };
 		void 	setObservationManager(ObservationManager *data) { obs_wrapper_.setObsMgr(data); };
 		
 		// initial camera
-		void 	setInitialCamera(CameraStatePtr cam) { init_cam_ = cam->clone(); }
+		void 	setInitialCamera(CamStatePtr cam) { init_cam_ = cam->clone(); }
 
-		CameraStatePtr initializeCamera();
+		CamStatePtr initializeCamera();
 		// set parameters
 		void 	setParameters(const std::string &name, const std::string &value);
 		void 	filterTargets(std::vector<int> &remove_idx);
@@ -452,7 +482,7 @@ namespace people {
 		MCMCSamplePtr getInitSample(double timesec);
 	protected:
 		// random number generator..
-		// cv::RNG         			rng_;
+		cv::RNG         			rng_;
 		/////////////////////////////////////
 		// previous distribution
 		PosteriorDistPtr			prev_dist_;
@@ -475,9 +505,10 @@ namespace people {
 		std::vector<cv::Rect>	ms_rts_;
 		std::vector<float>		ms_sims_;
 		/////////////////////////////////////
+
 		/////////////////////////////////////
 		// initial camera
-		CameraStatePtr init_cam_;
+		CamStatePtr init_cam_;
 		/////////////////////////////////////
 
 		/***********************************
@@ -503,10 +534,8 @@ namespace people {
 		double  perturb_y_;
 		double  perturb_z_;
 		double 	motion_sigma_vx_;
-		double 	motion_sigma_vy_;
 		double 	motion_sigma_vz_;
 		double  perturb_vx_;
-		double  perturb_vy_;
 		double  perturb_vz_;
 		///////////////////////////////////////////
 
@@ -528,7 +557,6 @@ namespace people {
 		///////////////////////////////////////////
 		// feature perturbation
 		double  perturb_feat_x_;
-		double  perturb_feat_y_;
 		double  perturb_feat_z_;
 		///////////////////////////////////////////
 

@@ -39,24 +39,8 @@ namespace people {
 	class PriorDist
 	{
 	public:
-		PriorDist() {
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-		};
-
-		PriorDist(PosteriorDistPtr prior, double timestamp):prev_dist_(prior),timestamp_(timestamp) {
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-			object_motion_params_.push_back(0.0);
-		};
-
+		PriorDist() {};
+		PriorDist(PosteriorDistPtr prior, double timestamp):prev_dist_(prior),timestamp_(timestamp) {};
 		virtual ~PriorDist() {};
 		virtual void setParameters(const std::string &name, const std::string &value);
 		virtual void initCache(MCMCSamplePtr sample);
@@ -67,7 +51,7 @@ namespace people {
 
 		// for debugging
 		virtual void print_all_cache(const SampleInfo &info, MCMCSamplePtr sample);
-#if 0 // def VEL_STATE
+#ifdef VEL_STATE
 		virtual void initMotionParameters();
 #endif
 	protected:
@@ -82,8 +66,22 @@ namespace people {
 		// one target prior cache : will be discarded if not accepted
 		cv::Mat one_target_motion_cache_;
 		// parameters
-		std::vector<double> object_motion_params_;
+#ifdef VEL_STATE
+		double motion_sigma_x_;
+		double motion_sigma_y_;
+		double motion_sigma_z_;
 
+		double motion_sigma_vx_;
+		double motion_sigma_vy_;
+		double motion_sigma_vz_;
+
+		std::vector<cv::Mat> motion_sigma_invs_;
+		std::vector<double> motion_sigma_dets_;
+#else
+		double motion_sigma_x_;
+		double motion_sigma_y_;
+		double motion_sigma_z_;
+#endif
 		double prob_stay_;
 		double prob_enter_;
 	};
@@ -154,7 +152,7 @@ namespace people {
 
 		virtual void computeNewInteractionModePrior(const SampleInfo &info);
 		virtual double computeInteractionPotential(const SampleInfo &info, MCMCSamplePtr sample);
-		virtual double computePairwiseInteractionPotential(ObjectStatePtr state1, ObjectStatePtr state2, bool isgroup);
+		virtual double computePairwiseInteractionPotential(PeopleStatePtr state1, PeopleStatePtr state2, bool isgroup);
 
 		double repulsion_const_;
 		double group_const_;
@@ -172,28 +170,8 @@ namespace people {
 	class PriorDistCameraEstimate : public PriorDistInteract
 	{
 	public:
-		PriorDistCameraEstimate():PriorDistInteract() {
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-		};
-
-		PriorDistCameraEstimate(PosteriorDistPtr prior, double timestamp):PriorDistInteract(prior, timestamp) {
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-			camera_motion_params_.push_back(0.0);
-		};
-
+		PriorDistCameraEstimate():PriorDistInteract() {};
+		PriorDistCameraEstimate(PosteriorDistPtr prior, double timestamp):PriorDistInteract(prior, timestamp) {};
 		virtual ~PriorDistCameraEstimate() {};
 
 		virtual void initCache(MCMCSamplePtr sample);
@@ -209,12 +187,11 @@ namespace people {
 		virtual void computeNewCameraPrior(const SampleInfo &info);
 
 		// parameters
-		std::vector<double> camera_motion_params_;
-		//double camera_motion_sigma_x_;
-		//double camera_motion_sigma_z_;
-		//double camera_motion_sigma_yaw_;
-		//double camera_motion_sigma_v_;
-		//double camera_motion_sigma_horizon_;
+		double camera_motion_sigma_x_;
+		double camera_motion_sigma_z_;
+		double camera_motion_sigma_yaw_;
+		double camera_motion_sigma_v_;
+		double camera_motion_sigma_horizon_;
 		
 		double prob_feat_enter_;
 		double prob_feat_stay_;

@@ -132,6 +132,7 @@ void DetectionReadinNode::quaryData(const std::string &name, void *data)
 void DetectionReadinNode::preprocess()
 {
 	assert(readDetectionResult(conf_file_));
+	// dbgShowConfImage(confidences_[10]);
 }
 
 void DetectionReadinNode::dbgShowConfImage(DetectionReadinConfidence &conf)
@@ -141,6 +142,18 @@ void DetectionReadinNode::dbgShowConfImage(DetectionReadinConfidence &conf)
 
 	float minval = 100000000.0f;
 	float maxval = -10000000.0f;
+#if 0
+	for(int i = 0; i < conf.map_.rows; i++) {
+		for(int j = 0; j < conf.map_.cols; j++) {
+			if(minval > conf.map_.at<float>(i, j)) {
+				minval = conf.map_.at<float>(i, j);
+			}
+			if(maxval < conf.map_.at<float>(i, j)) {
+				maxval = conf.map_.at<float>(i, j);
+			}
+		}
+	}
+#endif
 	minval = -5;
 	maxval = 5;
 
@@ -191,7 +204,9 @@ bool DetectionReadinNode::readDetectionResult(const std::string filename)
 		return false;
 	}
 	found_.clear();
+#ifdef USE_DET_RESPONSE
 	responses_.clear();
+#endif
 	confidences_.clear();
 	
 	char header[4];
@@ -241,10 +256,15 @@ bool DetectionReadinNode::readDetectionResult(const std::string filename)
 			assert(0);
 		}
 
+#ifdef USE_DET_RESPONSE
 		if( det[4] > pos_threshold_ ) {
 			responses_.push_back(max((double)det[4] - pos_threshold_, 0.0));
-
+			// responses_.push_back(det[4] + 0.5);
+#else
+		if( det[4] > .5 ) {
+#endif
 			cv::Rect rt(det[0], det[1], det[2], det[3]); 
+
 			if(version_ < 3){ 
 				if(obj_type_ == ObjPerson) {
 					rt.width = rt.height / WH_PERSON_RATIO;
@@ -262,13 +282,46 @@ bool DetectionReadinNode::readDetectionResult(const std::string filename)
 					}
 				}
 			}
+
+			// trick to use nms in opencv
 			found_.push_back(rt);
+			// found_.push_back(rt);
 		}
 	}
+#ifdef USE_DET_RESPONSE
+#if 0
+	std::vector<cv::Rect> found2 = found_;
+	std::vector<double> resps;
+
+	cv::groupRectangles(found2, 1, 0.2);
+	for(size_t i = 0; i < found2.size(); i ++) {
+		for(size_t j = 0; j < found_.size(); j++) {
+
+			if(found_[j].x == found2[i].x && 
+				found_[j].y == found2[i].y &&
+				found_[j].width == found2[i].width &&
+				found_[j].height == found2[i].height) {
+				
+				resps.push_back(max( responses_[j], 0.0 ) );
+
+				break;
+			}
+			assert(j != found_.size() - 1);
+		}
+	}
+	found_ = found2;
+	responses_ = resps;
+
+	std::cout << found_.size() << " " << resps.size() << std::endl; 
+	assert(found_.size() == responses_.size());
+#endif
+#else
+	cv::groupRectangles(found_, 1, 0.2);
+#endif
 
 	nread = fread(&nums, sizeof(unsigned int), 1, fp);
 	assert(nread == 1);
-
+	// float prev_size = 0.0;
 	for(size_t i = 0; i < nums; i++) {
 		DetectionReadinConfidence conf;
 		float *data;
@@ -313,11 +366,14 @@ std::vector<cv::Rect> DetectionReadinNode::getDetections()
 	return found_;
 }
 
+/*
+*/
 double DetectionReadinNode::getConfidence(const cv::Rect &rt, double depth)
 {
 	double overlap = 0.0; // detectionOberlap(rt);
+#ifdef USE_DET_RESPONSE
+	// weight_  = 0.5;
 	int idx = 0;
-
 	overlap = getMinDist2Dets(found_, idx, rt, det_std_x_, det_std_y_, det_std_h_);
 	if(overlap < 4.0) { // within range
 		if(obj_type_ == ObjPerson)
@@ -328,7 +384,11 @@ double DetectionReadinNode::getConfidence(const cv::Rect &rt, double depth)
 	else { // too far
 		overlap = 0.0;
 	}
-
+#else
+	overlap = std::max(4.0 - getMinDist2Dets(found_, rt, det_std_x_, det_std_y_, det_std_h_), 0.0) * 1 / 2;
+#endif
+	// overlap = getDist2AllDets(found_, rt, det_std_x_, det_std_y_, det_std_h_, 4.0) * 1 / 2;
+	// overlap = getOverlap2AllDets(found_, rt, 0.4) * 2 / 0.6;
 	if(version_ == 3) {
 		if(rt.height > 180) {
 			return -10.0;
@@ -347,7 +407,16 @@ double DetectionReadinNode::getConfidence(const cv::Rect &rt, double depth)
 				if((x < 0) || (y < 0) || (x > confidences_[i].map_.cols) || (y > confidences_[i].map_.rows)) {
 					return (overlap + obs_out_of_image) * weight_;
 				}
+#if 0				
+				std::cout << x << " " 
+							<< y << " : "
+							<< pt.x << " "
+							<< pt.y << " size : " 
+							<< confidences_[i].size_ << " ov : " << overlap << " conf: " 
+							<< confidences_[i].map_.at<float>(y, x) << std::endl << std::endl;
 
+				cv::waitKey();
+#endif
 				return (overlap + confidences_[i].map_.at<float>(y, x)) * weight_;
 			}
 		}
@@ -367,6 +436,26 @@ double DetectionReadinNode::getConfidence(const cv::Rect &rt, double depth)
 				if((x < 0) || (y < 0) || (x > confidences_[i].map_.cols) || (y > confidences_[i].map_.rows)) {
 					return (overlap + obs_out_of_image) * weight_;
 				}
+#if 0		
+				std::cout << "(" << pt.x << " - " << confidences_[i].minx_ << ") / " << confidences_[i].step_ << std::endl;
+				std::cout << "x : " << x << " y : " << y << std::endl;
+
+				std::cout << " " << weight_ << " " << confidences_[i].map_.at<float>(y, x) << " " << overlap << " ";
+				std::cout << "conf : " << (overlap + confidences_[i].map_.at<float>(y, x)) * weight_ << " ";
+
+				for(int ii = -5; ii < 5; ii++) {
+					for(int jj = -5; jj < 5; jj++) {
+						std::cout << confidences_[i].map_.at<float>(y + ii, x + jj) << " ";
+					}
+					std::cout << std::endl;
+				}
+
+				cv::Rect rtt = rt;
+				print_rect(rtt);
+				std::cout << "idx " << i;
+				confidences_[i].showMap(); 
+				cv::waitKey();
+#endif
 
 				return (overlap + confidences_[i].map_.at<float>(y, x)) * weight_;
 			}

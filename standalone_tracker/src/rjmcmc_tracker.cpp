@@ -67,20 +67,24 @@ void RJMCMCTracker::setParameters(const std::string &name, const std::string &va
 		motion_sigma_y_ = boost::lexical_cast<double>(value);
 	else if (name == "MotionSigmaZ")
 		motion_sigma_z_ = boost::lexical_cast<double>(value);
+#ifdef VEL_STATE
 	else if (name == "MotionSigmaVX")
 		motion_sigma_vx_ = boost::lexical_cast<double>(value);
 	else if (name == "MotionSigmaVZ")
 		motion_sigma_vz_ = boost::lexical_cast<double>(value);
+#endif
 	else if (name == "PerturbSigmaX")
 		perturb_x_ = boost::lexical_cast<double>(value);
 	else if (name == "PerturbSigmaY")
 		perturb_y_ = boost::lexical_cast<double>(value);
 	else if (name == "PerturbSigmaZ")
 		perturb_z_ = boost::lexical_cast<double>(value);
+#ifdef VEL_STATE
 	else if (name == "PerturbSigmaVX")
 		perturb_vx_ = boost::lexical_cast<double>(value);
 	else if (name == "PerturbSigmaVZ")
 		perturb_vz_ = boost::lexical_cast<double>(value);
+#endif
 	else if (name == "ProbStay")
 		prob_stay_ = boost::lexical_cast<double>(value);
 	else if (name == "ProbEnter")
@@ -169,12 +173,12 @@ void RJMCMCTracker::setParameters(const std::string &name, const std::string &va
 
 MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 {
-	MCMCSamplePtr ret(new MCMCSample);
+	MCMCSamplePtr ret = boost::make_shared<MCMCSample>(MCMCSample());
 	ObservationManager *mgr = obs_wrapper_.getManager();
 	
 	//////////////////////////////////////////////////////////////////////
 	// initialize camera
-	CameraStatePtr cam_state;
+	CamStatePtr cam_state;
 	if(estimate_camera_) {
 		cam_state = prev_dist_->getMeanCamera(); // initialize by previous camera
 		// first frame :)
@@ -185,6 +189,7 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 		}
 		else {
 			cam_state = initializeCamera();
+			// cam_state = cam_state->predict(timesec);
 		}
 	}
 	else {
@@ -192,7 +197,7 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 		cam_state = init_cam_->clone();
 		cam_state->setTS(timesec);
 	}
-	ret->setCameraState(cam_state);
+	ret->setCamState(cam_state);
 
 	assert(cam_state.get());
 	//////////////////////////////////////////////////////////////////////
@@ -200,26 +205,43 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 	//////////////////////////////////////////////////////////////////////
 	// initialize targets
 	//////////////////////////////////////////////////////////////////////
-	std::vector<ObjectStatePtr> obj_states;
-	std::vector<bool> obj_exists;
+	std::vector<PeopleStatePtr> states;
+	std::vector<bool> exists;
 	std::vector<TargetDistPtr> targets = prev_dist_->getTargetDists();
 	for(unsigned int i = 0; i < proposals_.size(); i++) {
-		ObjectStatePtr state;
+		PeopleStatePtr state;
 		bool exist = false;
+
 		exist = true;
 		if(proposals_[i].width != 0 && proposals_[i].height != 0) { // exist a proposal
 			state = cam_state->iproject(proposals_[i]); // mgr->getPeopleStateFromRect(proposals_[i], cam_state);
+#ifdef VEL_STATE
+			if(i < targets.size()) {
+				PeopleStatePtr prev_state = targets[i]->getMean();
+
+				state->setVX(prev_state->getVX() / 2);
+				state->setVY(0.0);
+				state->setVZ(prev_state->getVZ() / 2);
+			}
+#endif
 		}
 		else {
 			assert(i < targets.size());
 			state = targets[i]->getMean()->clone();
+#ifdef VEL_STATE
+			state = state->predict(timesec);
+
+			state->setVX(state->getVX() / 2);
+			state->setVY(0.0);
+			state->setVZ(state->getVZ() / 2);
+#endif
 		}
 		state->setTS(timesec);
 
-		obj_states.push_back(state);
-		obj_exists.push_back(exist);
+		states.push_back(state);
+		exists.push_back(exist);
 	}
-	ret->setObjectStates(obj_states, obj_exists);
+	ret->setStates(states, exists);
 	//////////////////////////////////////////////////////////////////////
 
 	//////////////////////////////////////////////////////////////////////
@@ -239,33 +261,34 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 		group_interaction.push_back(one_col);
 	}
 	ret->setInteractionMode(group_interaction);
-
+#ifdef CAM_EST
 	//////////////////////////////////////////////////////////////////////
 	// set initial features
 	//////////////////////////////////////////////////////////////////////
-	std::vector<FeatureStatePtr> feat_states;
-	std::vector<bool> feat_validities;
+	std::vector<GFeatStatePtr> feats;
+	std::vector<bool> validities;
 	for(size_t i = 0; i < feat_idx_.size(); i++) {
-		FeatureStatePtr fstate;
+		GFeatStatePtr fstate;
 		bool valid = false;
-		if(i < (size_t)prev_dist_->getNumFeatures()) {
+		if(i < (size_t)prev_dist_->getNumFeats()) {
 			// from previous distribution
-			fstate = prev_dist_->drawFeatureSample(i, timesec);
+			fstate = prev_dist_->drawFeatSample(i, timesec);
 
 			if(fstate.get())		valid = true;
 			else								valid = false;
 		}
 		else {
 			// new feature
-			fstate = mgr->getInitialFeatureState(feat_idx_[i], cam_state);
+			fstate = mgr->getInitialGFeatState(feat_idx_[i], cam_state);
 			valid = true;
 		}
 		fstate->setTS(timesec);
-		feat_states.push_back(fstate);
-		feat_validities.push_back(valid);
+		feats.push_back(fstate);
+		validities.push_back(valid);
 	}
-	ret->setFeatureStates(feat_states, feat_validities);
+	ret->setGFeatStates(feats, validities);
 	//////////////////////////////////////////////////////////////////////
+#endif
 	// std::cout << "initial sample information : " << std::endl;
 	// ret->print();
 	//////////////////////////////////////////////////////////////////////
@@ -292,7 +315,7 @@ void RJMCMCTracker::filterFeatures(std::vector<int> &remove_idx)
 		feat_idx_.erase(it);
 	}
 
-	my_assert(prev_dist_->getNumFeatures() == (int)feat_idx_.size());
+	my_assert(prev_dist_->getNumFeats() == (int)feat_idx_.size());
 }
 
 void RJMCMCTracker::setDefaultParameters()
@@ -317,9 +340,9 @@ void RJMCMCTracker::setDefaultParameters()
 	prob_move_cam_update_ = 0.1;
 	prob_move_interaction_flip_ = 0.1;
 	/////////////////////////////////////////
-
+#ifdef CAM_EST
 	max_gfeats_ = 40;
-
+#endif
 	detection_sigma_x_ = 0.05; detection_sigma_y_ = 0.1; detection_sigma_h_ = 0.1;
 	/////////////////////////////////////////
 	motion_sigma_x_ = 0.9;	// 0.9/30 => 3cm
@@ -328,14 +351,12 @@ void RJMCMCTracker::setDefaultParameters()
 	perturb_x_ = 0.3; 
 	perturb_y_ = 0.1; 	
 	perturb_z_ = 0.3;
-
+#ifdef VEL_STATE
 	motion_sigma_vx_ = 3.;	
-	motion_sigma_vy_ = 0.;	
 	motion_sigma_vz_ = 3.;
 	perturb_vx_ = 1.5; 
-	perturb_vy_ = 0.; 
 	perturb_vz_ = 1.5;
-
+#endif
 	/////////////////////////////////////////
 	repulsion_const_ = 2.0;
 	group_const_ = 10.0;
@@ -357,7 +378,6 @@ void RJMCMCTracker::setDefaultParameters()
 
 	/////////////////////////////////////////
 	perturb_feat_x_ = 0.01; // not dependent on time
-	perturb_feat_y_ = 0.0;
 	perturb_feat_z_ = 0.01;
 	/////////////////////////////////////////
 	estimate_camera_ = true;
@@ -378,7 +398,7 @@ void save_sample_info(FILE *fp, int idx, SampleInfo &info, MCMCSamplePtr sample,
 	}
 
 	for(size_t i = 0; i < sample->getNumTargets(); i++) {
-		ObjectStatePtr temp = sample->getState(i);
+		PeopleStatePtr temp = sample->getState(i);
 		if(temp.get() != NULL)
 			fprintf(fp, "%.10f\t%.10f\t%.10f\t", temp->x_, temp->y_, temp->z_);
 		else
@@ -395,7 +415,7 @@ void save_sample_info(FILE *fp, int idx, SampleInfo &info, MCMCSamplePtr sample,
 	
 	for(size_t i = 0; i < targets.size(); i++) {
 		std::cout << "Target[" << i << "] state" << std::endl;
-		ObjectStatePtr mstate = targets[i]->getMean();
+		PeopleStatePtr mstate = targets[i]->getMean();
 		mstate->print();
 
 		cv::Rect rt = mgr->getRectFromState(mstate);
@@ -403,7 +423,7 @@ void save_sample_info(FILE *fp, int idx, SampleInfo &info, MCMCSamplePtr sample,
 
 		cv::rectangle(image_temp, rt.tl(), rt.br(), color, 2);
 		if(proposals_[i].get() != NULL) {
-			ObjectStatePtr temp_proposal = proposals_[i];
+			PeopleStatePtr temp_proposal = proposals_[i];
 			std::cout << "Target[" << i << "] proposal!!!!!!" << std::endl;
 			temp_proposal->print();
 			rt = mgr->getRectFromState(temp_proposal);
@@ -458,14 +478,14 @@ void RJMCMCTracker::prefilter_features(double timestamp)
 	std::vector<cv::Rect> target_rts;
 
 	if(prev_dist_->getNumTargets() > 0) {
-		CameraStatePtr cam_state;
+		CamStatePtr cam_state;
 		cam_state = prev_dist_->getMeanCamera(); // initialize by previous camera
 		cam_state = cam_state->predict(timestamp);
 
 		for(size_t i = 0; i < (size_t)prev_dist_->getNumTargets(); i ++) {
 			cv::Rect rt;
-			ObjectStatePtr obj_state = prev_dist_->getTargetDist(i)->getMean();
-			rt = cam_state->project(obj_state->predict(timestamp));
+			PeopleStatePtr ped_state = prev_dist_->getTarget(i)->getMean();
+			rt = cam_state->project(ped_state->predict(timestamp));
 			target_rts.push_back(rt);
 		}
 	}
@@ -474,6 +494,7 @@ void RJMCMCTracker::prefilter_features(double timestamp)
 	filterFeatures(del_idx);
 
 	std::vector<int> new_feat_idx = mgr->getFeatsIndex();
+
 	for(size_t i = 0; i < new_feat_idx.size(); i++) {
 		if(i < feat_idx_.size())
 			assert(feat_idx_[i] == new_feat_idx[i]);
@@ -483,21 +504,109 @@ void RJMCMCTracker::prefilter_features(double timestamp)
 	///////////////////////////////////////////////////////////////////////////////////
 	// double check
 	std::vector<cv::Point2f> feats = mgr->getAllFeats();
+#if 0
+	static int frame_cnt = 0;
+	cv::Mat image = mgr->getImage().clone();
+	for(size_t i = 0; i < target_rts.size(); i++) {
+		cv::rectangle(image, target_rts[i].tl(), target_rts[i].br(), cv::Scalar(255, 0, 0), 2);
+	}
+	for(size_t i = 0; i < feats.size(); i++) {
+		cv::Rect rt(feats[i].x - 5, feats[i].y - 5, 10, 10);
+		cv::rectangle(image, rt.tl(), rt.br(), cv::Scalar(255, 0, 255), 2);
+	}
+
+	std::string filename = "/u/wchoi/temp2/frame";
+	filename += boost::lexical_cast<std::string>(frame_cnt++);
+	filename += ".jpg";
+	cv::imwrite(filename, image);
+#endif
 	for(size_t i = 0; i < feats.size(); i++) {
 		my_assert(!in_any_rect(target_rts, cv::Point2f(feats[i].x, feats[i].y)));
 	}
 }
 
-CameraStatePtr RJMCMCTracker::initializeCamera()
+CamStatePtr RJMCMCTracker::initializeCamera()
 {
 	// need to initialize camera..
-	CameraStatePtr prev_cam = prev_dist_->getMeanCamera();
+	CamStatePtr prev_cam = prev_dist_->getMeanCamera();
 	double 		timesec = obs_wrapper_.getTimeSec();
-
-	CameraStatePtr cur_cam = prev_cam->predict(timesec);
+	CamStatePtr cur_cam = prev_cam->predict(timesec);
+	// find initial horizon by vp votes
+	CamStatePtr temp = cur_cam->clone();
+	double max_conf = 0;
 	ObservationManager *mgr = obs_wrapper_.getManager();
-	cur_cam = mgr->initializeCamera(cur_cam);
+	//cv::Mat timage(50, 2000, CV_8U);
+	//int cnt = 0;
+	for(int i = cur_cam->getHorizon() - 200; i < cur_cam->getHorizon() + 200; i += 1) {
+		temp->setHorizon(i);
+		double tval = mgr->getCameraConfidence(temp);
+		if(max_conf < tval) {
+			cur_cam->setHorizon(i);
+			max_conf = tval;
+		}
+	}
+	std::cout << "**** initial horizon : " << cur_cam->getHorizon() << std::endl;
+	
+	// estimate x,z,yaw
+	// find yaw/x/z/vx by few sampling - hold features, targets fixed
+	temp = cur_cam->clone();
+	std::vector<GFeatStatePtr> mfeats;
+	for(int i = 0; i < prev_dist_->getNumFeats(); i++) {
+		mfeats.push_back(prev_dist_->getMeanFeature(i));
+	}
 
+	double minval = cur_cam->getYaw() - (5.0 / 180.0 * M_PI);
+	double maxval = cur_cam->getYaw() + (5.0 / 180.0 * M_PI);
+	double dval = (0.1 / 180.0 * M_PI);
+	max_conf = -1e50;
+	double val = minval;
+	while(val <= maxval) {
+		// double yaw = minyaw; yaw < maxyaw; yaw += dyaw) {
+		double tval = 0.0f;
+		temp->setYaw(val);
+		for(int i = 0; i < mfeats.size(); i++) {
+			tval += mgr->getGFeatConfidence(mfeats[i], i, temp, "");
+		}
+
+		if(max_conf < tval) {
+			max_conf = tval;
+			cur_cam->setYaw(val);
+		}
+		val += dval;
+	}
+	std::cout << "**** initial dyaw : " << cur_cam->getYaw() - prev_cam->predict(timesec)->getYaw() << std::endl;
+
+	// find optimal initial velocity
+	minval = std::max(0.0, cur_cam->getV() - 5.0);
+	maxval = cur_cam->getV() + 5.0;
+	dval = 0.25;
+	val = minval;
+	max_conf = -1e50;
+	
+	double oldtimestamp = prev_cam->getTS();
+	temp = cur_cam->predict(oldtimestamp); // move back
+
+	while(val <= maxval) {
+		// double yaw = minyaw; yaw < maxyaw; yaw += dyaw) {
+		double tval = 0.0f;
+
+		temp->setV(val);
+		temp = temp->predict(timesec);
+		for(int i = 0; i < mfeats.size(); i++) {
+			tval += mgr->getGFeatConfidence(mfeats[i], i, temp, "");
+		}
+
+		if(max_conf < tval) {
+			max_conf = tval;
+
+			cur_cam->setV(temp->getV());
+			cur_cam->setX(temp->getX());
+			cur_cam->setZ(temp->getZ());
+		}
+
+		temp = temp->predict(oldtimestamp);
+		val += dval;
+	}
 	prev_cam->predict(timesec)->print();
 	cur_cam->print();
 
@@ -544,8 +653,10 @@ void RJMCMCTracker::runMCMCSampling()
 	motion_prior.setParameters("MotionSigmaX", boost::lexical_cast<std::string>(motion_sigma_x_));
 	motion_prior.setParameters("MotionSigmaY", boost::lexical_cast<std::string>(motion_sigma_y_));
 	motion_prior.setParameters("MotionSigmaZ", boost::lexical_cast<std::string>(motion_sigma_z_));
+#ifdef VEL_STATE
 	motion_prior.setParameters("MotionSigmaVX", boost::lexical_cast<std::string>(motion_sigma_vx_));
 	motion_prior.setParameters("MotionSigmaVZ", boost::lexical_cast<std::string>(motion_sigma_vz_));
+#endif
 	motion_prior.setParameters("ProbEnter", boost::lexical_cast<std::string>(prob_enter_));
 	motion_prior.setParameters("ProbStay", boost::lexical_cast<std::string>(prob_stay_));
 	/////////////////////////////////////////////////////////////////////////////////////////////////
@@ -594,6 +705,7 @@ void RJMCMCTracker::runMCMCSampling()
 	prop_dist.setParameters("PerturbSigmaX", boost::lexical_cast<std::string>(perturb_x_));
 	prop_dist.setParameters("PerturbSigmaY", boost::lexical_cast<std::string>(perturb_y_));
 	prop_dist.setParameters("PerturbSigmaZ", boost::lexical_cast<std::string>(perturb_z_));
+#ifdef VEL_STATE
 	prop_dist.setParameters("PerturbSigmaVX", boost::lexical_cast<std::string>(perturb_vx_));
 	prop_dist.setParameters("PerturbSigmaVZ", boost::lexical_cast<std::string>(perturb_vz_));
 	/////////////////////////////////////////////////////////////////////////////////////////////////
@@ -603,17 +715,18 @@ void RJMCMCTracker::runMCMCSampling()
 	prop_dist.setParameters("MotionSigmaVX", boost::lexical_cast<std::string>(motion_sigma_vx_));
 	prop_dist.setParameters("MotionSigmaVZ", boost::lexical_cast<std::string>(motion_sigma_vz_));
 	/////////////////////////////////////////////////////////////////////////////////////////////////
-
+#endif
+#if 0 // def MYDEBUG
+	char msg[1000];
+	open_dbg_file("/home/wgchoi/dbg_file.txt");
+	// save all prior info
+#endif
+#ifdef VEL_STATE
+	motion_prior.initMotionParameters();
+#endif
 	prefilter_features(timesec);
 	/************************************************/
 	prop_dist.setDetections(proposals_);
-	for(size_t i = 0; i < proposals_.size(); i++) {
-		std::cout << "proposal " << i << std::endl;
-		std::cout << proposals_[i].x << " " 
-							<< proposals_[i].y << " "
-							<< proposals_[i].width << " "
-							<< proposals_[i].height << " " << std::endl;
-	}
 	// get initial sample..
 	one_sample = getInitSample(timesec); // initialization
 	samples.push_back(one_sample);
@@ -646,15 +759,97 @@ void RJMCMCTracker::runMCMCSampling()
 		// compute observation lkhood
 		obs_ar = obs_wrapper_.computeLogObservationLkhood(info, one_sample);
 		// compute motion prior
+#ifdef VEL_STATE
 		prior_ar = motion_prior.computeLogMotionPrior(info, one_sample);
+#else
+		prior_ar = motion_prior.computeLogMotionPrior(info);
+#endif
 		// compute proposal ratio
 		q_ar = prop_dist.getProposalLogLkhood(one_sample, info);
 		// compute lkhood from MS
 		ms_ar = ms_wrapper.computeLogMSLkhood(info);
 		// evaluate acceptance ratio
 		ar = obs_ar + prior_ar + q_ar + ms_ar;
+#ifdef TESTING_CONF
+		if(info.type_ == MoveUpdate && info.idx_ < prev_dist_->getNumTargets() && info.idx_ == 2 && timesec >= 0.12) {
+			std::cout << "Move : Update " << ar << " idx " << info.idx_ << std::endl;
+			std::cout << "from : ";
+			one_sample->getState(info.idx_)->print();
+			std::cout << "to : ";
+			info.state_->print();
+			std::cout << " obs : " << obs_ar 
+					<< " pr : " << prior_ar 
+					<< " q : " << q_ar 
+					<< " ms : " << ms_ar << std::endl;
 
-		rval = g_rng.uniform((double)0.0, (double)1.0);
+			// draw sample
+			cv::Mat image = obs_wrapper_.getManager()->getImage().clone();
+			CamStatePtr cam = one_sample->getCamState();
+			PeopleStatePtr old_state = one_sample->getState(info.idx_);
+			PeopleStatePtr new_state = info.state_;
+			
+			cv::Rect new_rt = cam->project(new_state);
+			cv::Rect old_rt = cam->project(old_state);
+			
+			cv::rectangle(image, old_rt.tl(), old_rt.br(), cv::Scalar(0, 0, 0), 2);
+			cv::rectangle(image, new_rt.tl(), new_rt.br(), cv::Scalar(255, 255, 255), 2);
+
+			cv::imshow("dbg_tracker", image);
+			cv::waitKey();
+		}
+#endif
+#if 0
+		if(info.type_ == MoveCamUpdate) {
+			std::cout << "Move : update " << ar << std::endl;
+			std::cout << "camera from : ";
+			one_sample->getCamState()->print();
+			std::cout << "camera to : ";
+			info.cam_state_->print();
+			std::cout << " obs : " << obs_ar 
+					<< " pr : " << prior_ar 
+					<< " q : " << q_ar 
+					<< " ms : " << ms_ar << std::endl;
+
+			cv::Mat image = obs_wrapper_.getManager()->getImage().clone();
+
+			cv::Mat camera_view(image, cv::Rect(20, 20, 40, 40));
+			camera_view = cv::Scalar(255, 255, 255);
+			cv::rectangle(camera_view, cv::Point(0,0), cv::Point(39, 39), cv::Scalar(0,0,0), 3);
+			// draw view point
+			double angle = info.cam_state_->getYaw();
+			double x = cos(angle), z = sin(angle);
+			cv::line(camera_view, cv::Point(19, 19), cv::Point(19 + 20 * x, 19 + 20 * z), cv::Scalar(0,0,255), 1);
+			angle = one_sample->getCamState()->getYaw();
+			x = cos(angle), z = sin(angle);
+			cv::line(camera_view, cv::Point(19, 19), cv::Point(19 + 20 * x, 19 + 20 * z), cv::Scalar(0,0,0), 1);
+
+			cv::line(image, cv::Point(0, one_sample->getCamState()->getHorizon()), cv::Point(1000, one_sample->getCamState()->getHorizon()), cv::Scalar(0, 0, 0));
+			cv::line(image, cv::Point(0, info.cam_state_->getHorizon()), cv::Point(1000, info.cam_state_->getHorizon()), cv::Scalar(0, 0, 255));
+			
+			cv::imshow("dbg_tracker", image);
+			cv::waitKey();
+		}
+#endif
+#if 0
+		if(info.type_ == MoveStay) {
+			std::cout << "Move : Stay " << ar << " idx " << info.idx_ << std::endl;
+			info.state_->print();
+			std::cout << " obs : " << obs_ar 
+					<< " pr : " << prior_ar 
+					<< " q : " << q_ar 
+					<< " ms : " << ms_ar << std::endl;
+			cv::waitKey();
+		}
+		else if(info.type_ == MoveLeave) {
+			std::cout << "Move : Leave " << ar << " idx " << info.idx_ << std::endl;
+			std::cout << " obs : " << obs_ar 
+					<< " pr : " << prior_ar 
+					<< " q : " << q_ar 
+					<< " ms : " << ms_ar << std::endl;
+			cv::waitKey();
+		}
+#endif
+		rval = rng_.uniform((double)0.0, (double)1.0);
 		if(ar > log(rval)) {
 			// update sample..
 			one_sample = one_sample->setNewSample(info);
@@ -680,8 +875,8 @@ void RJMCMCTracker::runMCMCSampling()
 	}
 	print_sampling_history();
 
-	std::cout << "mcmc_tracker target cnt [0]: " << samples[0]->getNumObjects();
-	std::cout << " [end] : " << samples[samples.size()-1]->getNumObjects() << std::endl;
+	std::cout << "mcmc_tracker target cnt [0]: " << samples[0]->getNumTargets();
+	std::cout << " [end] : " << samples[samples.size()-1]->getNumTargets() << std::endl;
 
 	/* Target and Sample managements.... */
 	// finalize the tracking.. you can use burnin, thining here!!
