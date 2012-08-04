@@ -13,6 +13,7 @@ Currently, we use DPM detector by Felzenszwalb et al as a baseline method. The m
 
 3. generate image and confidence list files using commands like
  ls seq02-img-left/*.jpg > seq02_imlist.txt
+ 
  ls seq02-img-left/*.conf > seq02_conflist.txt
 
 4. modify "track.sh" in "standalone_tracker" accordingly and run the tracker. 
