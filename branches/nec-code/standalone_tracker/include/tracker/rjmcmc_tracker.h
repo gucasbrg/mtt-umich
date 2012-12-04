@@ -312,6 +312,9 @@ namespace people {
 
 		double computeLogObservationLkhood(const SampleInfo &info, MCMCSamplePtr sample) {
 			double ret = 0.0;
+			double w_det = 5.0;
+			// double w_det = 5.0; -> original
+
 			switch(info.type_) {
 			case MoveAdd:
 			case MoveDelete:
@@ -323,7 +326,7 @@ namespace people {
 			case MoveUpdate:
 				// 1000 -> 5times, 
 				// 1001 -> 3times + 1/2 detection box
-				ret = 5.0 * (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
+				ret = w_det * (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
 				// ret = (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
 				break;
 			case MoveInteractionFlip:
@@ -338,14 +341,15 @@ namespace people {
 			case MoveCamUpdate:
 				//std::cout << "obs details : people dets : ";
 				for(size_t i = 0; i < new_people_cache_.size(); i++) {
-					ret += 5.0 * (double)(new_people_cache_[i] - people_cache_[i]);
+					ret += w_det * (double)(new_people_cache_[i] - people_cache_[i]);
 					// ret += (double)(new_people_cache_[i] - people_cache_[i]);
 				}
 				//std::cout << ret ;
 				for(size_t i = 0; i < new_feat_cache_.size(); i++) {
 					ret += (double)(new_feat_cache_[i] - feat_cache_[i]);
 				}
-				ret += obs_mgr_->getCameraConfidence(info.cam_state_) - obs_mgr_->getCameraConfidence(sample->getCameraState());
+				ret += obs_mgr_->getCameraConfidence(info.cam_state_) 
+						- obs_mgr_->getCameraConfidence(sample->getCameraState());
 
 				my_assert(!isnan(ret));
 				break;
