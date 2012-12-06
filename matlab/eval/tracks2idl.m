@@ -18,7 +18,9 @@ for i = 1:length(tracks)
 	iid = find(ts == tracks(i).ts(1), 1);
 	for j = 1:length(tracks(i).ts)
 		fid = iid + j - 1;
-		rt = tracks(i).rect(:, j)'; % convert_width(tracks(i).rect(:, j), 2.3)';
+		% rt = tracks(i).rect(:, j)'; % convert_width(tracks(i).rect(:, j), 2.3)';
+        %  get around with the fixed aspect ratio problem...
+        rt = convert_width(tracks(i).rect(:, j), 0.6)';
 		idl(fid).bb(end + 1, :) = [rt(1:2), rt(3:4) + rt(1:2) - 1];
 		idl(fid).score(end + 1) =  tracks(i).conf(j);
 	end

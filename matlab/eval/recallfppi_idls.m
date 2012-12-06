@@ -27,7 +27,7 @@ thlist = unique(floor(thlist .* 100) / 100)';
 if(quickrun)
     thlist(thlist > 5) = [];
     numlist = length(thlist);
-    thlist = thlist(1:floor(numlist/20):end);
+    thlist = thlist(1:max(1, floor(numlist/100)):end);
 end
 
 for th = thlist

@@ -23,7 +23,6 @@ clear data;
 if ~exist(outdir, 'dir')
 	mkdir(outdir);
 end
-
 try
     matlabpool open
 end
@@ -34,8 +33,7 @@ for idx = 1:16:length(files)
         i = idx + j - 1;
         if(i > length(files))
             continue;
-        end
-        
+        end        
         filename = [imdir '/' files(i).name];
         conf_file = [outdir '/' files(i).name(1:end-4) '.conf'];
 
