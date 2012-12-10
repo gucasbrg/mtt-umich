@@ -11,9 +11,13 @@ set(gca, 'xscale', 'log');
 set(gca, 'yscale', 'log');
 axis([0.002 10 0.2 1]);
 set(gca, 'YTick', 0.2:0.1:1);
+set(gca, 'fontsize', 15);
+
 % set(gca, 'XTick', 0.003:10);
 grid on
-xlabel('fppi');
-ylabel('miss rate');
+h = xlabel('fppi');
+set(h, 'fontsize', 20);
+h = ylabel('miss rate');
+set(h, 'fontsize', 20);
 
 end
