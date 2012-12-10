@@ -6,10 +6,14 @@ hold on
 plot(est(:, 1), est(:, 2), 'm.-');
 hold off
 grid on
-legend({'GT' 'EST'});
-title('x-z location');
-xlabel('x');
-ylabel('z');
+h=legend({'GT' 'EST'});
+set(h, 'fontsize', 20);
+h=title('x-z location');
+set(h, 'fontsize', 20);
+h=xlabel('x');
+set(h, 'fontsize', 15);
+h=ylabel('z');
+set(h, 'fontsize', 15);
 axis equal
 %%
 fps = 10;
@@ -27,9 +31,13 @@ hold on
 plot(vest, 'm-')
 hold off
 grid on
-legend({'GT' 'EST'});
-title('velocity');
-xlabel('frames');
-ylabel('v (m/s)');
+h=legend({'GT' 'EST'});
+set(h, 'fontsize', 20);
+h=title('velocity');
+set(h, 'fontsize', 20);
+h=xlabel('frames');
+set(h, 'fontsize', 15);
+h=ylabel('v (m/s)');
+set(h, 'fontsize', 15);
 
 end
