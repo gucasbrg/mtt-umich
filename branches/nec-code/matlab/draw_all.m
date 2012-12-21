@@ -3,7 +3,7 @@ clear
 basedir='/home/wgchoi/Dataset/KITTI/';
 
 fstep = 1;
-seqs = {'0093' '0104' '0004'};
+seqs = {'0047' '0093' '0104' '0004' '0056'};
 
 for i = 1:length(seqs)
     seqname = seqs{i}; % '0056';
