@@ -183,6 +183,8 @@ namespace people {
 			bbs.push_back(dets[i]);
 		}
 		cv::groupRectangles(bbs, 1, 0.2);
+		
+		prev_gfeats_ = gfeats_;
 
 		gfeats_.clear(); // clear all features;
 		gfeats_idx_.clear(); // clear all features;
@@ -198,7 +200,7 @@ namespace people {
 				float x = feat_pts[idx].x;
 				float y = feat_pts[idx].y;
 
-				if(!in_any_rect(bbs, cv::Point2f(x, y))) {
+				if(1) { // !in_any_rect(bbs, cv::Point2f(x, y))) {
 					cv::Point2f feat(x, y);
 
 					gfeats_.push_back(feat);
@@ -229,7 +231,7 @@ namespace people {
 			// std::cout << "selecting " << idx << ":" << responses[idx] << "=" << *it << std::endl;
 			float x = feat_pts[idx].x;
 			float y = feat_pts[idx].y;
-			if(!in_any_rect(bbs, cv::Point2f(x, y))) {
+			if(1) { // !in_any_rect(bbs, cv::Point2f(x, y))) {
 				cv::Point2f feat(x, y);
 				gfeats_.push_back(feat);
 				gfeats_idx_.push_back(current_feat_idx[idx]);

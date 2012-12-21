@@ -129,6 +129,7 @@ namespace people {
 		int findIdx(double ts);
 
 		inline CameraStatePtr getState(int idx) {return states_[idx];};
+		inline CameraStatePtr getLastState() {return states_[states_.size()-1];};
 	protected:
 		std::vector<CameraStatePtr> states_;
 	};
@@ -177,8 +178,9 @@ namespace people {
 		 find match between targets and detections
 		 rearrange detections to get proposals
 		********************************************/
-		void getProposals(const std::vector<ObjectStatePtr> &dets, const cv::Mat &image, std::vector<ObjectStatePtr> &proposals);
-		void getProposals(const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals);
+		void getProposals(const std::vector<cv::Rect> &preds, const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals);
+		void getProposals(const std::vector<ObjectStatePtr> &dets, const cv::Mat &image, std::vector<ObjectStatePtr> &proposals, double timesec);
+		void getProposals(const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals, double timesec);
 
 		void setParameters(const std::string &name, const std::string &value);
 
@@ -191,14 +193,18 @@ namespace people {
 		cv::Mat drawTargets(cv::Mat &image_color, double ts);
 
 		cv::Mat drawFeatures(cv::Mat &image, const std::vector<int> &remove_idx, double ts);
+
+		int getTargetID(int index);
+		std::vector<int> getAllTrackingTargetID();
+
+		inline CameraStatePtr getLastCamera() { return cam_.getLastState(); }
 	protected:
 		void saveAllTargets(std::string &dirname);
 		void saveAllFeatures(std::string &dirname);
 		void saveAllCamera(std::string &dirname);
 
 		float computeDistance(const TargetPtr target, const ObjectStatePtr det, const cv::Mat &image);
-		float computeDistance(const TargetPtr target, const cv::Rect& det, const cv::Mat &image);
-		cv::Scalar get_target_color(int id);
+		float computeDistance(const TargetPtr target, const cv::Rect& det, const cv::Mat &image, CameraStatePtr cam);
 	protected:
 		std::vector<TargetPtr> 	targets_;
 		std::vector<FeaturePtr>	feats_;

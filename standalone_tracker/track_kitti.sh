@@ -18,7 +18,7 @@ then
 	HOR=$5
 fi
 
-ROOTDIR=/home/wgchoi/datasets/necdata/
+ROOTDIR=/home/wgchoi/Dataset/KITTI/
 
 IMLIST=$ROOTDIR$SEQNAME"_imlist.txt"
 #VPLIST=$ROOTDIR$SEQNAME"vplist.txt"
@@ -36,18 +36,19 @@ fi
 
 rm -rf results/$SEQNAME.$POSTFIX
 mkdir results/$SEQNAME.$POSTFIX
-INIT_CAM="--init_cam_focal 800.0 --init_cam_x 0 --init_cam_y 1.3 --init_cam_z 0.0 --init_cam_v 5.0 --init_cam_yaw 0.0 --init_cam_horizon $HOR --init_cam_xcenter 621"
+INIT_CAM="--init_cam_focal 980.0 --init_cam_x 0 --init_cam_y 1.3 --init_cam_z 0.0 --init_cam_v 5.0 --init_cam_yaw 0.0 --init_cam_horizon $HOR --init_cam_xcenter 621"
 PARAMS="--outdir results/$SEQNAME.$POSTFIX\
 		--outvid results/$SEQNAME.$POSTFIX\
-		--showimg true\
-		--mean_horizon 170 --std_horizon 10
+		--showimg false\
+		--mean_horizon 170 --std_horizon 10\
 		--prob_stay 0.9 --prob_enter 0.2\
-		--cam_motion_std_horizon 100 --cam_sample_std_horizon 10 --cam_motion_std_yaw 0.6 --cam_sample_std_yaw 0.05 --cam_motion_std_v 5 --cam_sample_std_v 1\
+		--cam_motion_std_horizon 25 --cam_sample_std_horizon 10 --cam_motion_std_yaw 0.6 --cam_sample_std_yaw 0.05 --cam_motion_std_v 5 --cam_sample_std_v 1\
 		--feat_sample_std_x 0.2	--feat_sample_std_z 0.2\
-		--feat_sigma_u 5 --feat_sigma_v 20\
-		--det_std_x 0.1 --det_std_y 0.15 --det_std_h 0.15
-		--motion_std_x 0.5 --motion_std_y 0.1 --motion_std_z 0.5 --motion_std_vx 3.0 --motion_std_vz 3.0\
-		--sample_std_x 0.5 --sample_std_y 0.04 --sample_std_z 0.5 --sample_std_vx 2.0 --sample_std_vz 2.0\
-		--num_samples 10000 --num_burnin 2000 --num_thinning 200" # --motion_std_x 0.1 --motion_std_y 0.05 --motion_std_z 0.1 --sample_std_x 0.05 --sample_std_y 0.025 --sample_std_z 0.05"
+		--feat_sigma_u 5 --feat_sigma_v 5\
+		--det_std_x 0.1 --det_std_y 0.1 --det_std_h 0.1\
+		--motion_std_x 0.5 --motion_std_y 0.1 --motion_std_z 0.5 --motion_std_vx 6.0 --motion_std_vz 6.0\
+		--sample_std_x 0.5 --sample_std_y 0.04 --sample_std_z 0.5 --sample_std_vx 5.0 --sample_std_vz 5.0\
+		--num_samples 12000 --num_burnin 2000 --num_thinning 200" # --motion_std_x 0.1 --motion_std_y 0.05 --motion_std_z 0.1 --sample_std_x 0.05 --sample_std_y 0.025 --sample_std_z 0.05"
 # gdb --args ./bin/ptrack --imglist $IMLIST --conflist $CONFLIST --rootdir $ROOTDIR --dbg_show true $INIT_CAM --iframe $IFRAME --eframe $EFRAME $PARAMS $OBJ_PARAMS
+echo ./bin/ptrack --imglist $IMLIST --conflist $CONFLIST --rootdir $ROOTDIR --dbg_show true $INIT_CAM --iframe $IFRAME --eframe $EFRAME $PARAMS $OBJ_PARAMS > results/$SEQNAME.$POSTFIX"_config"
 ./bin/ptrack --imglist $IMLIST --conflist $CONFLIST --rootdir $ROOTDIR --dbg_show true $INIT_CAM --iframe $IFRAME --eframe $EFRAME $PARAMS $OBJ_PARAMS

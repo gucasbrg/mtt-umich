@@ -196,7 +196,7 @@ void RJMCMCProposal::initCache(MCMCSamplePtr sample)
 			}
 		}
 	}
-	printCache();
+	// printCache();
 }
 
 void RJMCMCProposal::printCache()

@@ -1332,5 +1332,7 @@ void PriorDistCameraEstimate::computeNewCameraPrior(const SampleInfo &info)
 			continue;
 		}
 		new_camera_prior_cache_.at<double>(i, 0) = prev_state->computeLogPrior(state, timestamp_, camera_motion_params_);
+		// std::cout << std::setprecision(2) <<  state->getElement(5) << ":" << prev_state->getElement(5) << " ";
 	}
+	// std::cout << std::endl;
 }

@@ -36,6 +36,7 @@
 #include <common/ped_state.h>
 #include <common/gfeat_state.h>
 #include <common/cam_state.h>
+#include <sys/stat.h>
 
 namespace people{
 	void show_image(cv::Mat &im, const std::string &name, int max_height)
@@ -369,12 +370,17 @@ namespace people{
 								<< line.angle_ << " " << line.length_ << std::endl;
 	}
 
-	void print_matrix(cv::Mat &mat)
+	void print_matrix(cv::Mat &mat, bool dblprec)
 	{
 		std::cout << "rows : " << mat.rows << ", cols : " << mat.cols << std::endl;
 		for(size_t i = 0; i < mat.rows; i++) {
 			for(size_t j = 0; j < mat.cols; j++) {
-				std::cout << mat.at<double>(i, j) << '\t';
+				if(dblprec) {
+					std::cout << mat.at<double>(i, j) << '\t';
+				}
+				else {
+					std::cout << mat.at<float>(i, j) << '\t';
+				}
 			}
 			std::cout << std::endl;
 		}
@@ -435,4 +441,19 @@ namespace people{
 			confs.push_back(buf[i].score);
 		}
 	}
+
+	bool file_exists(const std::string &filename) {
+		struct stat buf;
+		if (stat(filename.c_str(), &buf) != -1) {
+			return true;
+		}
+		return false;
+	}
+
+	cv::Scalar get_target_color(int id)
+	{
+		cv::Scalar color = cv::Scalar(((id * 120) % 256), ((id * 60) % 256), ((id * 30) % 256));
+		return color;
+	}
+
 };

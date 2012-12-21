@@ -75,6 +75,8 @@ namespace people {
 		virtual std::vector<int> getFeatsIndex() { return gfeats_idx_; };
 		virtual std::vector<cv::Point2f> getAllFeats() { return gfeats_; };
 
+		virtual std::vector<cv::Point2f> dbgGetAllPrevFeats() { return prev_gfeats_; };
+
 		// bool debug_check_projections(PeopleStatePtr state);
 		inline double 	getTimeSec() {return time_sec_;};
 		inline cv::Mat	getImage() {return img_color_;}
@@ -99,6 +101,7 @@ namespace people {
 
 		std::vector<ObservationNode*> 			nodes_;
 		std::vector<cv::Point2f> 						gfeats_;
+		std::vector<cv::Point2f> 						prev_gfeats_;
 		std::vector<int>		 								gfeats_idx_;
 
 		double 															gfeat_sigma_u_; 

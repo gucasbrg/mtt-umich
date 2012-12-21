@@ -209,6 +209,21 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 		exist = true;
 		if(proposals_[i].width != 0 && proposals_[i].height != 0) { // exist a proposal
 			state = cam_state->iproject(proposals_[i]); // mgr->getPeopleStateFromRect(proposals_[i], cam_state);
+			if(i < targets.size()){
+				double dx = state->getElement(0) - targets[i]->getMean()->getElement(0); 
+				double dz = state->getElement(2) - targets[i]->getMean()->getElement(2); 
+				double tdiff = timesec - state->getTS();
+
+				double vx = 0.1 * (dx / tdiff) + 0.9 * targets[i]->getMean()->getElement(3);
+				double vz = 0.1 * (dz / tdiff) + 0.9 * targets[i]->getMean()->getElement(5);
+
+				state->setElement(3, vx);
+				state->setElement(5, vz);
+
+				//targets[i]->getMean()->print();
+				//state->print();
+				//std::cout << targets[i]->getMean()->getTS() << " " << timesec << std::endl;
+			}
 		}
 		else {
 			assert(i < targets.size());
@@ -220,6 +235,7 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 		obj_exists.push_back(exist);
 	}
 	ret->setObjectStates(obj_states, obj_exists);
+	//if(timesec >0)  assert(0);
 	//////////////////////////////////////////////////////////////////////
 
 	//////////////////////////////////////////////////////////////////////
@@ -252,8 +268,15 @@ MCMCSamplePtr RJMCMCTracker::getInitSample(double timesec)
 			// from previous distribution
 			fstate = prev_dist_->drawFeatureSample(i, timesec);
 
-			if(fstate.get())		valid = true;
-			else								valid = false;
+			if(fstate.get()) {
+				if(mgr->getFeatureConfidence(fstate, i, cam_state) < -100.0f) {
+					valid = false;
+				}
+				else	valid = true;
+			}
+			else	{
+				valid = false;
+			}
 		}
 		else {
 			// new feature
@@ -504,6 +527,53 @@ CameraStatePtr RJMCMCTracker::initializeCamera()
 	return cur_cam;
 }
 
+#ifdef DEBUG_TARGET
+#endif
+
+// #define DEBUG_CAM
+#ifdef DEBUG_CAM
+void draw_new_cam(ObservationManager *mgr, std::vector<double> fcache, std::vector<double> newfcache, CameraStatePtr newcam, CameraStatePtr oldcam, MCMCSamplePtr sample)
+{
+	cv::Mat image = mgr->getImage().clone();
+	std::vector<cv::Point2f> fs = mgr->getAllFeats();
+	std::vector<cv::Point2f> oldfs = mgr->dbgGetAllPrevFeats();
+
+	for(size_t i = 0; i < oldfs.size(); i++) {
+		cv::circle(image, oldfs[i], 5, cv::Scalar(255, 255, 255), CV_FILLED);
+	}
+
+	for(size_t i = 0; i < sample->getNumFeatures(); i++) {
+		if(!sample->getFeatureValidity(i))
+			continue;
+		cv::circle(image, fs[i], 5, cv::Scalar(10, 10, 10), CV_FILLED);
+	}
+
+	for(size_t i = 0; i < sample->getNumFeatures(); i++) {
+		if(!sample->getFeatureValidity(i))
+			continue;
+		FeatureStatePtr state = sample->getFeatureState(i);
+		cv::Point2f pt2;
+
+		cv::Point3f pt = newcam->project(state);
+		pt2.x = pt.x; pt2.y = pt.y;
+		cv::circle(image, pt2, 3, cv::Scalar(255, 10, 10), CV_FILLED);
+
+		ostringstream text;
+		text << std::setprecision(2) << newfcache[i];
+		cv::putText(image, text.str(), pt2, cv::FONT_HERSHEY_SIMPLEX, .4, cv::Scalar(255,0,0), 1);
+
+		pt = oldcam->project(state);
+		pt2.x = pt.x; pt2.y = pt.y;
+		cv::circle(image, pt2, 3, cv::Scalar(10, 255, 10), CV_FILLED);
+
+		ostringstream text2;
+		text2 << std::setprecision(2) << fcache[i];
+		cv::putText(image, text2.str(), pt2, cv::FONT_HERSHEY_SIMPLEX, .4, cv::Scalar(0,255,0), 1);
+	}
+	cv::imshow("dbg", image); cv::waitKey(200);
+}
+#endif
+
 // #define TESTING_CONF
 void RJMCMCTracker::runMCMCSampling()
 {	
@@ -518,6 +588,7 @@ void RJMCMCTracker::runMCMCSampling()
 	PriorDistCameraEstimate		motion_prior(prev_dist_, timesec);
 	MeanShiftWrapper					ms_wrapper;
 
+	obs_wrapper_.setPrevInfo(prev_dist_->getNumTargets(), prev_dist_->getNumFeatures());
 	// verification
 	my_assert(ms_rts_.size() == ms_sims_.size());
 	my_assert(ms_rts_.size() == (size_t)prev_dist_->getNumTargets());
@@ -562,7 +633,6 @@ void RJMCMCTracker::runMCMCSampling()
 	/////////////////////////////////////////////////////////////////////////////////////////////////
 	motion_prior.setParameters("ProbFeatEnter", boost::lexical_cast<std::string>(prob_feat_enter_));
 	motion_prior.setParameters("ProbFeatStay", boost::lexical_cast<std::string>(prob_feat_stay_));
-
 	motion_prior.setParameters("InteractionOn", boost::lexical_cast<std::string>(interaction_on_));
 	/////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -603,10 +673,10 @@ void RJMCMCTracker::runMCMCSampling()
 	prop_dist.setParameters("MotionSigmaVX", boost::lexical_cast<std::string>(motion_sigma_vx_));
 	prop_dist.setParameters("MotionSigmaVZ", boost::lexical_cast<std::string>(motion_sigma_vz_));
 	/////////////////////////////////////////////////////////////////////////////////////////////////
-
 	prefilter_features(timesec);
 	/************************************************/
 	prop_dist.setDetections(proposals_);
+	/*
 	for(size_t i = 0; i < proposals_.size(); i++) {
 		std::cout << "proposal " << i << std::endl;
 		std::cout << proposals_[i].x << " " 
@@ -614,6 +684,7 @@ void RJMCMCTracker::runMCMCSampling()
 							<< proposals_[i].width << " "
 							<< proposals_[i].height << " " << std::endl;
 	}
+	*/
 	// get initial sample..
 	one_sample = getInitSample(timesec); // initialization
 	samples.push_back(one_sample);
@@ -626,6 +697,11 @@ void RJMCMCTracker::runMCMCSampling()
 	/************************************************/
 
 	init_sampling_history();
+#ifdef DEBUG_TARGET
+	int bdbg = 0;
+	std::cout << "do you like debuging? (1/0) ";
+	std::cin >> bdbg;
+#endif
 	while(++counter < num_samples_) {
 		// generate new sample
 		info = prop_dist.drawNewSample(one_sample);
@@ -639,6 +715,46 @@ void RJMCMCTracker::runMCMCSampling()
 			samples.push_back(one_sample);
 			continue;
 		}
+
+#ifdef DEBUG_CAM
+		if(info.type_ == MoveCamUpdate) {
+			int id;
+			std::cout << "which variable? (0:f 1:xcenter 2:x 3:y 4:z 5:yaw 6:v 7:horizon) ";
+			std::cin >> id;
+			double val;
+			std::cout << "value? ";
+			std::cin >> val;
+			info.cam_state_ = one_sample->getCameraState()->clone();
+			info.cam_state_->setElement(id, val);
+		}
+#endif
+#ifdef DEBUG_TARGET
+		if(bdbg && info.type_ == MoveLeave) {
+		}
+		if(bdbg && info.type_ == MoveUpdate) {
+			int id;
+			std::cout << "which target? 0~" << one_sample->getNumObjects()-1 << " ";
+			std::cin >> id;
+			info.idx_ = id;
+
+			one_sample->getObjectState(id)->print();
+			info.obj_state_ = one_sample->getObjectState(id)->clone();
+
+			double val;
+			std::cout << "x? ";
+			std::cin >> val;
+			info.obj_state_->setElement(0, val);
+			std::cout << "z? ";
+			std::cin >> val;
+			info.obj_state_->setElement(2, val);
+			std::cout << "vx? ";
+			std::cin >> val;
+			info.obj_state_->setElement(3, val);
+			std::cout << "vz? ";
+			std::cin >> val;
+			info.obj_state_->setElement(5, val);
+		}
+#endif
 		// preprocess caches
 		motion_prior.computeNewSampletMotionPrior(info);
 		obs_wrapper_.computeNewSampleObservationLkhood(info, one_sample);
@@ -650,12 +766,37 @@ void RJMCMCTracker::runMCMCSampling()
 		// compute proposal ratio
 		q_ar = prop_dist.getProposalLogLkhood(one_sample, info);
 		// compute lkhood from MS
-		ms_ar = ms_wrapper.computeLogMSLkhood(info);
+		// ms_ar = ms_wrapper.computeLogMSLkhood(info);
 		// evaluate acceptance ratio
 		ar = obs_ar + prior_ar + q_ar + ms_ar;
-
+#ifdef DEBUG_CAM
+		if(info.type_ == MoveCamUpdate) {
+			std::cout << "org : " ;
+			one_sample->getCameraState()->print();
+			std::cout << "new : " ;
+			info.cam_state_->print();
+			std::cout << ar << " " << obs_ar << " " << prior_ar << " " << q_ar << " " << ms_ar << std::endl;
+			draw_new_cam(obs_wrapper_.getManager(), obs_wrapper_.get_feat_cache(), obs_wrapper_.get_new_feat_cache(), 
+							info.cam_state_->clone(), one_sample->getCameraState()->clone(), one_sample);
+		}
+#endif
+#ifdef DEBUG_TARGET
+		if(bdbg && info.type_ == MoveUpdate) {
+			std::cout << "org : " ;
+			one_sample->getObjectState(info.idx_)->print();
+			std::cout << "new : " ;
+			info.obj_state_->print();
+			std::cout << ar << " " << obs_ar << " " << prior_ar << " " << q_ar << " " << ms_ar << std::endl;
+		}
+#endif
 		rval = g_rng.uniform((double)0.0, (double)1.0);
 		if(ar > log(rval)) {
+#ifdef DEBUG_TARGET
+			if(bdbg && info.type_ == MoveLeave) {
+				std::cout << "removing..." << info.idx_ << std::endl;
+				one_sample->getObjectState(info.idx_)->print();
+			}
+#endif
 			// update sample..
 			one_sample = one_sample->setNewSample(info);
 			// update caches..
@@ -679,16 +820,16 @@ void RJMCMCTracker::runMCMCSampling()
 		prop_dist.dbgCheckCache(one_sample);
 	}
 	print_sampling_history();
-
-	std::cout << "mcmc_tracker target cnt [0]: " << samples[0]->getNumObjects();
-	std::cout << " [end] : " << samples[samples.size()-1]->getNumObjects() << std::endl;
-
+	// std::cout << "mcmc_tracker target cnt [0]: " << samples[0]->getNumObjects();
+	// std::cout << " [end] : " << samples[samples.size()-1]->getNumObjects() << std::endl;
 	/* Target and Sample managements.... */
 	// finalize the tracking.. you can use burnin, thining here!!
 	// clear previous samples..
 	prev_dist_->setSamples(samples, burnin_, thinning_);
 	if(show_dbg_msg_) {
+#ifdef DEBUG_TARGET
 		prev_dist_->print_target_summary();
+#endif
 	}
 #ifdef SAVE_ALL_SAMPLES
 	fclose(fp);

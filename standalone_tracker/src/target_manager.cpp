@@ -491,15 +491,20 @@ float TargetManager::computeDistance(const TargetPtr target, const ObjectStatePt
 	return dist;
 }
 
-float TargetManager::computeDistance(const TargetPtr target, const cv::Rect &det, const cv::Mat &image)
+float TargetManager::computeDistance(const TargetPtr target, const cv::Rect &det, const cv::Mat &image, CameraStatePtr cam)
 {
 	float dist= 0;
 	
 	if(target->computeColorSim(image, det) < 0.65) {
 		return INF_DIST;
 	}
-
+#if 1
+	cv::Rect rt = cam->project(target->states_[target->states_.size()-1]);
+	dist = bb_intunion(det, rt);
+	min_overlap_ = 0.2;
+#else
 	dist = target->getOverlap(det);
+#endif
 	if(dist < min_overlap_) {
 		dist = INF_DIST;
 	}
@@ -510,11 +515,97 @@ float TargetManager::computeDistance(const TargetPtr target, const cv::Rect &det
 	return dist;
 }
 
-void TargetManager::getProposals(const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals)
+// #define SHOW_ASSOC
+void TargetManager::getProposals(const std::vector<cv::Rect> &preds, const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals)
+{
+	std::vector<int> association;
+	min_overlap_ = 0.1;
+#ifdef SHOW_ASSOC
+	cv::Mat simage = image.clone();
+	for(size_t i = 0; i < dets.size(); i++) {
+		cv::Rect rt = dets[i];
+		cv::rectangle(simage, rt.tl(), rt.br(), cv::Scalar(0, 0, 0), 2);
+	}
+	for(size_t i = 0; i < preds.size(); i++) {
+		cv::Rect rt = preds[i];
+		cv::rectangle(simage, rt.tl(), rt.br(), cv::Scalar(255, 255, 255), 2);
+	}
+
+	for(size_t i = 0; i < targets_.size(); i++) {
+		if(targets_[i]->getStatus() == TargetTracking) {
+			cv::Rect rt = targets_[i]->rts_[targets_[i]->rts_.size()-1];
+			cv::rectangle(simage, rt.tl(), rt.br(), cv::Scalar(0, 255, 255), 2);
+		}
+	}
+	cv::imshow("assoc", simage);
+	cv::waitKey(50);
+#endif
+	association.clear();
+	proposals.clear();
+	// build assignment matrix
+	if (preds.size() > 0) {
+		float cost; 
+		float *assign = new float [preds.size()];
+		float *distMat = new float [preds.size() * dets.size()];
+
+		for(size_t i = 0; i < preds.size(); i++) {
+			for(size_t j = 0; j < dets.size(); j++) {
+				cost = bb_intunion(preds[i], dets[i]);
+				if(cost < min_overlap_) {
+					cost = INF_DIST;
+				}
+				else {
+					cost = -log(cost);
+				}
+				distMat[i + preds.size() * j] = cost;
+			}
+		}
+		// solve assignment problem
+		assignmentoptimal(assign, &cost, distMat, preds.size(), dets.size(), INF_DIST);
+		// assign matched detections to proposal
+		for(size_t i = 0; i < preds.size(); i++) {
+			int detid = (int)assign[i];
+			association.push_back(detid);
+		}
+		delete assign;
+		delete distMat;
+	}
+	// handle remaining(non-matched) detections
+	for(size_t i = 0; i < dets.size(); i++) {
+		if(std::find(association.begin(), association.end(), i) == association.end())
+			association.push_back((int)i);
+	}
+	// allocate proposals
+	for(size_t i = 0; i < association.size(); i++)
+	{
+		cv::Rect rt(0, 0, 0, 0);
+		if(association[i] >= 0) {
+			rt = dets[association[i]];
+		}
+		proposals.push_back(rt);
+	}
+}
+
+std::vector<int> TargetManager::getAllTrackingTargetID()
+{
+	std::vector<int> ret;
+	for(size_t i = 0; i < targets_.size(); i++) {
+		if(targets_[i]->getNumStates() > 0) {
+			if(targets_[i]->getStatus() == TargetTracking) {
+				ret.push_back(i);
+			}
+		}
+	}
+	return ret;
+}
+
+void TargetManager::getProposals(const std::vector<cv::Rect> &dets, const cv::Mat &image, std::vector<cv::Rect> &proposals, double timesec)
 {
 	std::vector<int>				association;
 	std::vector<TargetPtr> 	trackingTargets;
-
+#ifdef SHOW_ASSOC
+	cv::Mat simage = image.clone();
+#endif
 	association.clear();
 	proposals.clear();
 	// find existing targets..
@@ -528,10 +619,13 @@ void TargetManager::getProposals(const std::vector<cv::Rect> &dets, const cv::Ma
 		float cost; 
 		float *assign = new float [trackingTargets.size()];
 		float *distMat = new float [trackingTargets.size() * dets.size()];
-
+#ifdef SHOW_ASSOC
+#endif
+		CameraStatePtr camera = getLastCamera()->clone();
+		camera = camera->predict(timesec);
 		for(size_t i = 0; i < trackingTargets.size(); i++) {
 			for(size_t j = 0; j < dets.size(); j++) {
-				distMat[i + trackingTargets.size() * j] = computeDistance(trackingTargets[i], dets[j], image);
+				distMat[i + trackingTargets.size() * j] = computeDistance(trackingTargets[i], dets[j], image, camera);
 			}
 		}
 		// solve assignment problem
@@ -564,7 +658,7 @@ void TargetManager::getProposals(const std::vector<cv::Rect> &dets, const cv::Ma
 }
 
 // arrange detections by solving association problem to targets.
-void TargetManager::getProposals(const std::vector<ObjectStatePtr> &dets, const cv::Mat &image, std::vector<ObjectStatePtr> &proposals)
+void TargetManager::getProposals(const std::vector<ObjectStatePtr> &dets, const cv::Mat &image, std::vector<ObjectStatePtr> &proposals, double timesec)
 {
 	std::vector<int>				association;
 	std::vector<TargetPtr> 	trackingTargets;
@@ -693,7 +787,7 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 			irt = trt & imrt;
 			
 			float visible = (float)(irt.width * irt.height) / (trt.width * trt.height);
-			if(visible < 0.3) { // filter out
+			if(visible < 0.5) { // filter out
 				targets_[i]->setStatus(TargetTerminated);
 				remove_idx.push_back(current_target_idx[i]);
 			}
@@ -703,7 +797,6 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 			}
 		}
 	}
-
 	// filter from confidence values
 	for(size_t i = 0; i < targets_.size(); i++) {
 		if(targets_[i]->getStatus() == TargetTracking) {
@@ -731,8 +824,8 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 					int idx2 = targets_[j]->getNumStates() - 1; // last item = current time frame
 					cv::Rect r2 = targets_[j]->getRect(idx2);
 
-					double ol = bb_overlap(r1, r2);
-					if(ol > 0.65) {
+					double ol = bb_intunion(r1, r2);
+					if(ol > 0.5) {
 						if(idx1 > idx2) { // target i is tracked for longer time
 							targets_[j]->setStatus(TargetTerminated);
 							remove_idx.push_back(current_target_idx[j]);
@@ -747,16 +840,18 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 						float dist  = abs((r1.x + r1.width / 2) - (r2.x + r2.width / 2));
 						if((dist < r1.width / 4) || (dist < r2.width / 4)){
 							cv::Rect ir = r1 & r2;
-							float covered = (float)(ir.width * ir.height) / (r1.width * r1.height);
-							if(covered > 0.9) {
-								targets_[i]->setStatus(TargetTerminated);
-								remove_idx.push_back(current_target_idx[i]);
-								break;
-							}
-							covered = (float)(ir.width * ir.height) / (r2.width * r2.height);
-							if(covered > 0.9) {
-								targets_[j]->setStatus(TargetTerminated);
-								remove_idx.push_back(current_target_idx[j]);
+							float covered1 = (float)(ir.width * ir.height) / (r1.width * r1.height);
+							float covered2 = (float)(ir.width * ir.height) / (r2.width * r2.height);
+							if((covered1 > 0.75) || (covered2 > 0.75)) {
+								if(idx1 > idx2) { // target i is tracked for longer time
+									targets_[j]->setStatus(TargetTerminated);
+									remove_idx.push_back(current_target_idx[j]);
+								}
+								else {
+									targets_[i]->setStatus(TargetTerminated);
+									remove_idx.push_back(current_target_idx[i]);
+									break;
+								}
 							}
 						}
 					}
@@ -767,12 +862,6 @@ std::vector<int> TargetManager::getTerminatingTargets(double threshold, cv::Size
 	// sort
 	std::sort(remove_idx.begin(), remove_idx.end());
 	return remove_idx;
-}
-
-cv::Scalar TargetManager::get_target_color(int id)
-{
-	cv::Scalar color = cv::Scalar(((id * 120) % 256), ((id * 60) % 256), ((id * 30) % 256));
-	return color;
 }
 
 cv::Mat TargetManager::drawFeatures(cv::Mat &image, const std::vector<int> &remove_idx, double ts)
@@ -810,6 +899,20 @@ cv::Mat TargetManager::drawFeatures(cv::Mat &image, const std::vector<int> &remo
 		}
 	}
 	return image_draw;
+}
+
+int TargetManager::getTargetID(int index)
+{
+	for(size_t i = 0; i < targets_.size(); i++) {
+		if(targets_[i]->getNumStates() > 0) {
+			if(targets_[i]->getStatus() == TargetTracking) {
+				if(index-- == 0) {
+					return i;
+				}
+			}
+		}
+	}
+	return targets_.size() + index;
 }
 
 cv::Mat TargetManager::drawTargets(cv::Mat &image_color, double ts)
