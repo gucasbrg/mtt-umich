@@ -23,8 +23,12 @@ bboxes = get_boxes(cam, targets);
 
 assert(length(bboxes) == length(imfiles));
 cols = colormap;
+
 for i = 1:fstep:length(bboxes)
-    imshow(fullfile(basedir, imfiles{i}));
+    im=imread(fullfile(basedir, imfiles{i}));
+    imshow(im);
+    imsz = size(im);
+    
     hold on;
     
     for j = 1:length(bboxes(i).tid)
@@ -34,6 +38,9 @@ for i = 1:fstep:length(bboxes)
         rect = convert_width(rect', 0.6)';
         thickness = 3 * targets(bboxes(i).tid(j)).conf(bboxes(i).idx(j));
         if(targets(bboxes(i).tid(j)).conf(bboxes(i).idx(j)) < threshold)
+            continue;
+        end
+        if(inimage(rect, imsz) < 0.8)
             continue;
         end
         rectangle('position', rect, 'Curvature', 0.1, 'edgecolor', col, 'Linewidth', thickness);
