@@ -575,11 +575,6 @@ ObservationManager *createManager()
 	return mgr;
 }
 
-cv::Scalar get_target_color(int id) {
-	cv::Scalar color = cv::Scalar(((id * 120) % 256), ((id * 60) % 256), ((id * 30) % 256));
-	return color;
-}
-
 cv::Mat draw_features(ObservationManager *mgr, PosteriorDistPtr dist, cv::Mat &image_color, const std::vector<int> &remove_idx, bool bshow = true)
 {
 	cv::Mat image = image_color.clone();
@@ -598,7 +593,7 @@ cv::Mat draw_features(ObservationManager *mgr, PosteriorDistPtr dist, cv::Mat &i
 			cv::Point3f pt = mean_cam->project(feats[j]);
 			pt2.x = pt.x;
 			pt2.y = pt.y;
-			cv::circle(image, pt2, fsize1, cv::Scalar(10, 10, 10), CV_FILLED);
+			cv::circle(image, pt2, fsize1, cv::Scalar(255, 255, 10), CV_FILLED);
 		}
 	}
 
@@ -816,6 +811,200 @@ void dbg_test()
 	assert(0);
 }
 
+#ifdef USE_KALMAN
+class SmoothTrackFilters
+{
+public:
+	SmoothTrackFilters() {};
+	virtual ~SmoothTrackFilters() {};
+
+	virtual CameraStatePtr predictCamera(double timestamp) = 0;
+	virtual ObjectStatePtr predictTarget(double timestamp, int idx) = 0;
+	virtual FeatureStatePtr predictFeature(double timestamp, int idx) = 0;
+
+	virtual bool correctCamera(double timestamp) = 0;
+	virtual ObjectStatePtr correctTarget(double timestamp, int idx, TargetDistPtr dist) = 0;
+	virtual bool correctFeature(double timestamp, int idx) = 0;
+};
+
+class KalmanTrackFilters : public SmoothTrackFilters
+{
+public:
+	typedef struct {
+		int idx; 
+		double ts;
+		cv::KalmanFilter filter;
+	}_one_filter;
+
+	KalmanTrackFilters() {};
+	virtual ~KalmanTrackFilters() {};
+
+	virtual CameraStatePtr predictCamera(double timestamp) 
+	{
+		CameraStatePtr ret;
+		return ret;
+	};
+
+	virtual bool correctCamera(double timestamp) 
+	{
+		return true;
+	};
+
+	virtual ObjectStatePtr predictTarget(double timestamp, int idx)
+	{
+		int i; 
+		for(i = 0; i < target_filters_.size(); i++) {
+			if(target_filters_[i].idx == idx) {
+				double dt = timestamp - target_filters_[i].ts;
+
+				// set transition matrix
+				target_filters_[i].filter.transitionMatrix = cv::Mat::eye(5, 5, CV_32F);
+				target_filters_[i].filter.transitionMatrix.at<float>(0, 3) = dt;
+				target_filters_[i].filter.transitionMatrix.at<float>(2, 4) = dt;
+
+				cv::Mat prediction = target_filters_[i].filter.predict();
+				
+				ObjectStatePtr ret(new ObjectStateVel);
+				ret->setElement(0, prediction.at<float>(0, 0));
+				ret->setElement(1, prediction.at<float>(1, 0));
+				ret->setElement(2, prediction.at<float>(2, 0));
+				ret->setElement(3, prediction.at<float>(3, 0));
+				ret->setElement(5, prediction.at<float>(4, 0));
+				ret->setTS(timestamp);
+				return ret;
+			}
+		}
+		ObjectStatePtr ret(new ObjectStateVel);
+		return ret;
+	};
+
+	virtual ObjectStatePtr correctTarget(double timestamp, int idx, TargetDistPtr dist)
+	{
+		// from posterior => 
+		// estimate measurement vector
+		// estimate measurement noise
+		int i; 
+		std::vector<ObjectStatePtr> states = dist->getStates();
+
+		if(states.size() == 0) {
+			// will be disregarded
+			ObjectStatePtr ret(new ObjectStateVel);
+			return ret;
+		}
+
+		cv::Mat samples(3, states.size(), CV_32F); 
+		for(i = 0; i < states.size(); i++) {
+			samples.at<float>(0, i) = states[i]->getElement(0); // x 
+			samples.at<float>(1, i) = states[i]->getElement(1); // y 
+			samples.at<float>(2, i) = states[i]->getElement(2); // z
+		}
+		cv::Mat mean;
+		cv::Mat cov;
+		calcCovarMatrix(samples, cov, mean, CV_COVAR_NORMAL | CV_COVAR_COLS);
+		// print_matrix(mean);
+		// print_matrix(cov);
+		// print_matrix(samples, false);
+		for(i = 0; i < target_filters_.size(); i++) {
+			if(target_filters_[i].idx == idx) {
+				cv::Mat mean2(3, 1, CV_32F);
+
+				for(int r = 0; r < 3; r++) {
+					mean2.at<float>(r, 0) = mean.at<double>(r, 0);
+					for(int c = 0; c < 3; c++) {
+						target_filters_[i].filter.measurementNoiseCov.at<float>(r, c) 
+							= cov.at<double>(r, c);
+					}
+				}
+				setIdentity(target_filters_[i].filter.measurementNoiseCov, 0.1);
+
+				cv::Mat poststate = target_filters_[i].filter.correct(mean2);
+				target_filters_[i].ts = timestamp;
+
+				ObjectStatePtr ret(new ObjectStateVel);
+				ret->setElement(0, poststate.at<float>(0, 0));
+				ret->setElement(1, poststate.at<float>(1, 0));
+				ret->setElement(2, poststate.at<float>(2, 0));
+				ret->setElement(3, poststate.at<float>(3, 0));
+				ret->setElement(5, poststate.at<float>(4, 0));
+				ret->setTS(timestamp);
+
+				// temporary debugging 
+				if(idx == 1)  {
+					std::cout << i << ":" << idx << std::endl;
+					// print_matrix(target_filters_[i].filter.statePre, false);
+					print_matrix(target_filters_[i].filter.statePost, false);
+					print_matrix(target_filters_[i].filter.errorCovPost, false);
+					print_matrix(mean2, false);
+				}
+
+				return ret;
+			}
+		}
+		// not found
+		_one_filter f; 
+
+		f.idx = idx;
+		f.ts = timestamp;
+
+		// initialize KF
+		f.filter.init(5, 3);
+		// H = I
+		setIdentity(f.filter.measurementMatrix);
+		// print_matrix(f.filter.measurementMatrix, false);
+
+		// initialize prediction
+		f.filter.statePost.at<float>(0, 0) = mean.at<double>(0,0); 
+		f.filter.statePost.at<float>(1, 0) = mean.at<double>(1,0); 
+		f.filter.statePost.at<float>(2, 0) = mean.at<double>(2,0); 
+		f.filter.statePost.at<float>(3, 0) = 0.0; // don't know
+		f.filter.statePost.at<float>(4, 0) = 0.0; // don't know
+		// print_matrix(f.filter.statePost, false);
+
+		// process noise
+		setIdentity(f.filter.processNoiseCov);
+		f.filter.processNoiseCov.at<float>(0,0) = 1e-8;
+		f.filter.processNoiseCov.at<float>(1,1) = 1e-8;
+		f.filter.processNoiseCov.at<float>(2,2) = 1e-8;
+		f.filter.processNoiseCov.at<float>(3,3) = 9;
+		f.filter.processNoiseCov.at<float>(4,4) = 9;
+		
+		// print_matrix(f.filter.processNoiseCov, false);
+		// initialize error matrix with the observed variance
+		setIdentity(f.filter.errorCovPost);
+		f.filter.errorCovPost.at<float>(0,0) = cov.at<double>(0,0);
+		f.filter.errorCovPost.at<float>(1,1) = cov.at<double>(1,1);
+		f.filter.errorCovPost.at<float>(2,2) = cov.at<double>(2,2);
+		f.filter.errorCovPost.at<float>(3,3) = 100; // don't know
+		f.filter.errorCovPost.at<float>(4,4) = 100; // don't know
+		// print_matrix(f.filter.errorCovPost, false);
+		target_filters_.push_back(f);
+		ObjectStatePtr ret(new ObjectStateVel);
+		ret->setElement(0, mean.at<double>(0, 0));
+		ret->setElement(1, mean.at<double>(1, 0));
+		ret->setElement(2, mean.at<double>(2, 0));
+		ret->setTS(timestamp);
+		// ret->print();
+		// assert(0);
+		return ret;
+	};
+
+	virtual FeatureStatePtr predictFeature(double timestamp, int idx)
+	{
+		FeatureStatePtr ret;
+		return ret;
+	};
+
+	virtual bool correctFeature(double timestamp, int idx)
+	{
+		return true;
+	};
+protected:
+	std::vector<_one_filter> camera_filters_;
+	std::vector<_one_filter> target_filters_;
+	std::vector<_one_filter> feature_filters_;
+};
+#endif
+
 /////////////////////////////////////////////////////////////////////
 int main (int ac, char** av)
 {
@@ -871,6 +1060,9 @@ int main (int ac, char** av)
 	ObservationManager 	*mgr = createManager();
 	RJMCMCTracker 		tracker;
 	FeatTracker			feat_tracker;
+#ifdef USE_KALMAN
+	SmoothTrackFilters* filter = new KalmanTrackFilters;
+#endif
 	// feat_tracker.setVideoFile("/home/wgchoi/feat_tracker.avi");
 	double timesec;
 	// set parameters
@@ -951,6 +1143,7 @@ int main (int ac, char** av)
 	
 	// initialize the first frame camera
 	CameraStatePtr init_cam(new SimplifiedCameraState<ObjectStateVel,StaticFeatureState>);
+	// CameraStatePtr init_cam(new SimplifiedCameraState<ObjectStateLoc,StaticFeatureState>);
 	init_cam->setElement(0, params.init_cam_focal);
 	init_cam->setElement(1, params.init_cam_xcenter);
 	init_cam->setElement(2, params.init_cam_x);
@@ -967,6 +1160,9 @@ int main (int ac, char** av)
 		timesec = (double)i / fps;
 		// process one frame!!!
 		std::string fname = params.root_dir + im_files[i];
+		if(i >= conf_files.size()) {
+			break;
+		}
 		std::string cname = params.root_dir + conf_files[i];
 
 		std::string vpname = "";
@@ -995,6 +1191,26 @@ int main (int ac, char** av)
 		// process detector
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		mgr->preprocess();
+#ifdef USE_KALMAN
+		////////////////////// update Kalman filter if used
+		// 1. update
+		// 2. set target manager
+		// 3. set posterior in rj-mcmc
+		///////////////////////////////////////////////////
+		std::vector<cv::Rect> target_preds;
+		if(i > 0) {
+			std::vector<int> tidx = target_manager.getAllTrackingTargetID();
+			CameraStatePtr cam_pred = target_manager.getLastCamera();
+			cam_pred = cam_pred->predict(timesec);
+
+			for(size_t j = 0; j < tidx.size(); j++) {
+				ObjectStatePtr state = filter->predictTarget(timesec, tidx[j]);
+				cv::Rect rt  = cam_pred->project(state);
+				target_preds.push_back(rt);
+			}
+		}
+#endif // USE_KALMAN
+		//////////////////////////////////////////////////
 		// run/set meanshift data
 		target_manager.runMeanShift(image_color);
 		tracker.setMeanShiftData(target_manager.getMSRects(), target_manager.getMSSims());
@@ -1002,7 +1218,50 @@ int main (int ac, char** av)
 		std::vector<cv::Rect> dets = mgr->getDetections();
 		// find matches between new detections and existing targets
 		std::vector<cv::Rect> proposal_rts;
-		target_manager.getProposals(dets, image_color, proposal_rts); // using overlap between bbs
+#ifdef USE_KALMAN
+		target_manager.getProposals(target_preds, dets, image_color, proposal_rts); // using overlap between bbs
+#else
+		target_manager.getProposals(dets, image_color, proposal_rts, timesec); // using overlap between bbs
+#if 0
+		cv::Mat tempimg = image_color.clone();
+		std::vector<TargetPtr> targets = target_manager.getTargets();
+		std::vector<int> tids = target_manager.getAllTrackingTargetID();
+
+		for(int j = 0; j < proposal_rts.size(); j++) {
+			cv::Rect rt = proposal_rts[j];
+
+			if(j < tids.size()) {
+				cv::Scalar col = get_target_color(j);
+
+				if(rt.x != 0) {
+					cv::rectangle(tempimg, rt.tl(), rt.br(), col, 2);
+				}
+				rt = targets[tids[j]]->rts_[targets[tids[j]]->rts_.size() - 1];
+				cv::rectangle(tempimg, rt.tl(), rt.br(), col, 4);
+			}
+			else {
+				cv::rectangle(tempimg, rt.tl(), rt.br(), cv::Scalar(0,0,0), 2);
+			}
+		}
+		if(i > 0) {
+			CameraStatePtr cam_pred = target_manager.getLastCamera();
+			cam_pred = cam_pred->predict(timesec);
+			for(size_t j = 0; j < tids.size(); j++) {
+				TargetPtr target = targets[tids[j]];
+				ObjectStatePtr state = target->getState(target->states_.size()-1)->clone();
+				cv::Rect rt = cam_pred->project(state);
+				cv::rectangle(tempimg, rt.tl(), rt.br(), cv::Scalar(255,255,255), 2);
+				state = state->predict(timesec);
+				rt = cam_pred->project(state);
+				cv::rectangle(tempimg, rt.tl(), rt.br(), cv::Scalar(155,155,155), 1);
+			}
+		}
+
+		cv::imshow("dbg_match", tempimg);
+		cv::waitKey();
+#endif
+
+#endif
 		tracker.setData(mgr, proposal_rts);
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		cv::Mat image_dets = draw_detections(mgr, image_color, params.showimg);
@@ -1019,13 +1278,23 @@ int main (int ac, char** av)
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		tracker.runMCMCSampling();
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		// arrange data and post process
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		PosteriorDistPtr posterior_dist = tracker.getPosterior();
 		std::vector<TargetDistPtr> tracks = posterior_dist->getTargetDists();
-		
+#ifdef USE_KALMAN
+		////////////////////// correct Kalman filter if used
+		// 1. correct
+		// 2. set posterior
+		///////////////////////////////////////////////////
+		for(size_t j = 0; j < tracks.size(); j++) {
+			int idx = target_manager.getTargetID(j);
+			// filter->predictTarget(timesec, idx);
+			filter->correctTarget(timesec, idx, tracks[j]);
+		}
+		//////////////////////////////////////////////////
+#endif // USE_KALMAN
 		// process targets
 		std::vector<cv::Rect> target_rts;
 		CameraStatePtr mean_cam = posterior_dist->getMeanCamera();
@@ -1095,12 +1364,15 @@ int main (int ac, char** av)
 		if(i % 50 == 49) {
 			target_manager.saveAll(params.out_dir);
 		}
-
+		std::cout << "frame" << i << std::endl;
+		// cv::waitKey();
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 	}
 	target_manager.saveAll(params.out_dir);
-
-	assert(im_files.size() == conf_files.size());
+	// assert(im_files.size() == conf_files.size());
+#ifdef USE_KALMAN
+	delete filter;
+#endif
 
 	delete mgr;
 }

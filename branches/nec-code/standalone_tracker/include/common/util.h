@@ -44,6 +44,7 @@ namespace people {
 
 	float bb_overlap(const cv::Rect& rt1, const cv::Rect& rt2);
 	float bb_intunion(const cv::Rect& rt1, const cv::Rect& rt2);
+	bool file_exists(const std::string &filename);
 
 	void nms(std::vector<cv::Rect>& bbs, std::vector<double>& confs);
 
@@ -64,7 +65,9 @@ namespace people {
 
 	void print_rect(cv::Rect &rt);
 	void print_line(const longline &line);
-	void print_matrix(cv::Mat &mat);
+	void print_matrix(cv::Mat &mat, bool dblprec = true);
+
+	cv::Scalar get_target_color(int id);
 #ifdef MYDEBUG
 #define my_assert(x) assert(x)
 	void open_dbg_file(const std::string &filename);

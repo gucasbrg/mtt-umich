@@ -83,6 +83,7 @@ DetectionReadinNode::DetectionReadinNode()
 	obj_type_ = g_objtype; // ObjPerson;
 	if(obj_type_ == ObjPerson)		pos_threshold_ = 0.0;
 	else if(obj_type_ == ObjCar)	pos_threshold_ = -0.85;
+	// else if(obj_type_ == ObjCar)	pos_threshold_ = -1.; // -0.85;
 	else							assert(0);
 
 	init();
@@ -321,13 +322,14 @@ double DetectionReadinNode::getConfidence(const cv::Rect &rt, double depth)
 {
 	double overlap = 0.0; // detectionOberlap(rt);
 	int idx = 0;
+	double reward = 4.0; // 4.0
 
 	overlap = getMinDist2Dets(found_, idx, rt, det_std_x_, det_std_y_, det_std_h_);
-	if(overlap < 4.0) { // within range
+	if(overlap < reward) { // within range
 		if(obj_type_ == ObjPerson)
-			overlap = (4.0 - overlap) * responses_[idx];
+			overlap = (reward - overlap) * responses_[idx];
 		else if(obj_type_ == ObjCar)
-			overlap = (4.0 - overlap) * responses_[idx];
+			overlap = (reward - overlap) * responses_[idx];
 	}
 	else { // too far
 		overlap = 0.0;
