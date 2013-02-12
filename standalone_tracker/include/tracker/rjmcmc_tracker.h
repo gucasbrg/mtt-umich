@@ -219,8 +219,19 @@ namespace people {
 	class ObservationWrapper
 	{
 	public:
-		ObservationWrapper():obs_mgr_(NULL){};
+		ObservationWrapper():obs_mgr_(NULL)
+		{
+			// initilization
+			num_prev_targets_ = 10000;
+			num_prev_features_ = 10000;
+		};
+
 		virtual ~ObservationWrapper(){};
+		
+		void setPrevInfo(int numtarget, int numfeatures) {
+			num_prev_targets_ = numtarget;
+			num_prev_features_ = numfeatures;
+		}
 
 		void setObsMgr(ObservationManager *mgr) {
 			obs_mgr_ = mgr;
@@ -312,6 +323,10 @@ namespace people {
 
 		double computeLogObservationLkhood(const SampleInfo &info, MCMCSamplePtr sample) {
 			double ret = 0.0;
+			double w_det = 1.0;
+			int n;
+			// double w_det = 5.0; -> original
+
 			switch(info.type_) {
 			case MoveAdd:
 			case MoveDelete:
@@ -323,7 +338,7 @@ namespace people {
 			case MoveUpdate:
 				// 1000 -> 5times, 
 				// 1001 -> 3times + 1/2 detection box
-				ret = 5.0 * (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
+				ret = w_det * (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
 				// ret = (double)(new_people_cache_[info.idx_] - people_cache_[info.idx_]);
 				break;
 			case MoveInteractionFlip:
@@ -337,15 +352,18 @@ namespace people {
 				break;
 			case MoveCamUpdate:
 				//std::cout << "obs details : people dets : ";
-				for(size_t i = 0; i < new_people_cache_.size(); i++) {
-					ret += 5.0 * (double)(new_people_cache_[i] - people_cache_[i]);
+				n = min((int)new_people_cache_.size(), num_prev_targets_);
+				for(size_t i = 0; i < n; i++) {
+					ret += w_det * (double)(new_people_cache_[i] - people_cache_[i]);
 					// ret += (double)(new_people_cache_[i] - people_cache_[i]);
 				}
 				//std::cout << ret ;
-				for(size_t i = 0; i < new_feat_cache_.size(); i++) {
+				n = min((int)new_feat_cache_.size(), num_prev_features_);
+				for(size_t i = 0; i < n; i++) {
 					ret += (double)(new_feat_cache_[i] - feat_cache_[i]);
 				}
-				ret += obs_mgr_->getCameraConfidence(info.cam_state_) - obs_mgr_->getCameraConfidence(sample->getCameraState());
+				ret += obs_mgr_->getCameraConfidence(info.cam_state_) 
+						- obs_mgr_->getCameraConfidence(sample->getCameraState());
 
 				my_assert(!isnan(ret));
 				break;
@@ -393,12 +411,19 @@ namespace people {
 
 		double getTimeSec() { return obs_mgr_->getTimeSec(); };
 		ObservationManager *getManager() { return obs_mgr_; };
+#if 1
+		std::vector<double> get_feat_cache(){return feat_cache_;}
+		std::vector<double> get_new_feat_cache(){return new_feat_cache_;}
+#endif
 	protected:
 		ObservationManager *obs_mgr_;
 		std::vector<double> people_cache_;
 		std::vector<double> feat_cache_;
 		std::vector<double> new_people_cache_;
 		std::vector<double> new_feat_cache_;
+
+		int num_prev_targets_;
+		int num_prev_features_;
 	};
 	//
 

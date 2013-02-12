@@ -121,7 +121,7 @@ std::vector<cv::KeyPoint> FeatTracker::detect_features(cv::Mat &image)
 	std::vector<cv::KeyPoint> key_points;
 #if 1
 	if(detector_type_ == "SURF") {
-		cv::SurfFeatureDetector det(25);
+		cv::SurfFeatureDetector det(2000); // make it more robust!
 		det.detect(image, key_points);
 	}
 	else {

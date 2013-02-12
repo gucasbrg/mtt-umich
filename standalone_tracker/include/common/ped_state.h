@@ -262,12 +262,25 @@ namespace people {
 			double temp = 0;
 			for(size_t i = 0 ; i < 3; i++) { // x, y, z
 				// x - dt * vx
-				temp = getElement(i) - dt * (getElement(i + 3));
-				ret += log_gaussian_prob(temp, state->getElement(i), params[i] * dt);
+				temp = state->getElement(i) - dt * (state->getElement(i + 3));
+				ret += log_gaussian_prob(temp, getElement(i), params[i] * dt);
+#ifdef DEBUG_TARGET
+				std::cout << i << " : " 
+							<< getElement(i) << " to " << temp << " => "
+							<< 	log_gaussian_prob(temp, getElement(i), params[i] * dt) << std::endl;
+#endif
 			}
 			for(size_t i = 3 ; i < 6; i++) { // vx, vy, vz
-				ret += log_gaussian_prob(getElement(i), state->getElement(i), params[i] * dt);
+				ret += log_gaussian_prob(state->getElement(i), getElement(i), params[i] * dt);
+#ifdef DEBUG_TARGET
+				std::cout << i << " : " 
+							<< getElement(i) << " to " << state->getElement(i) << " => "
+							<< log_gaussian_prob(state->getElement(i), getElement(i), params[i] * dt) << std::endl;
+#endif
 			}
+#ifdef DEBUG_TARGET
+			std::cout << std::endl;
+#endif
 			return ret;
 		}
 

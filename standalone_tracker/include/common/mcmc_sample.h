@@ -733,6 +733,9 @@ namespace people {
 
 			std::cout << "Target Summary!" << std::endl;
 			for(size_t i = 0; i < targets_.size(); i++) {
+				if(targets_[i]->getMean()->getConfidence() < 0.3) {
+					continue;
+				}
 				std::cout << "target[" << i << "]===" << std::endl;
 				targets_[i]->getMean()->print();
 				std::cout << "tracked for " << targets_[i]->getFrames() << " frames" << std::endl;
